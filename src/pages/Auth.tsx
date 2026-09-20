@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useConvexAuth } from "convex/react";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { Button } from "@/components/ui/button";
@@ -30,9 +30,11 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (!convexLoading && isAuthenticated) {
-    navigate(redirect, { replace: true });
-  }
+  useEffect(() => {
+    if (!convexLoading && isAuthenticated) {
+      navigate(redirect, { replace: true });
+    }
+  }, [convexLoading, isAuthenticated, navigate, redirect]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
