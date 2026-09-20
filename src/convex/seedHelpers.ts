@@ -179,6 +179,21 @@ export const insertStaff = internalMutation({
   },
 });
 
+/** Variant with an optional pre-created user account link (used by seed). */
+export const insertStaffWithUser = internalMutation({
+  args: {
+    schoolId: v.id("schools"), employeeNumber: v.string(),
+    firstName: v.string(), lastName: v.string(), gender: v.string(),
+    jobTitle: v.string(), department: v.string(), employmentType: v.string(),
+    employmentStatus: v.string(), email: v.string(), phone: v.string(),
+    hireDate: v.string(), userId: v.optional(v.id("users")),
+  },
+  handler: async (ctx, args) => {
+    const { userId, ...rest } = args;
+    return await ctx.db.insert("staff", { ...rest, userId });
+  },
+});
+
 export const linkStaffUser = internalMutation({
   args: { staffId: v.id("staff"), email: v.string() },
   handler: async (ctx, { staffId, email }) => {

@@ -2,9 +2,8 @@ import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Label } from "@/components/ui/label";
+import { StatusBadge } from "@/lib/status";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as ReTooltip,
   PieChart, Pie, Cell,
@@ -220,9 +219,9 @@ export default function Dashboard() {
       </div>
 
       <div className="mt-6">
-        <Label className="text-xs text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           All figures are computed live from your school's database.
-        </Label>
+        </p>
       </div>
     </div>
   );

@@ -85,18 +85,6 @@ export const seedAll = action({
     });
 
     /* ---------------- Users ---------------- */
-    async function ensureUser(email: string, name: string, password: string, role: string, schoolId: Id<"schools"> | undefined) {
-      const userId = await ctx.runMutation(internal.seedHelpers.ensureUserRecord, {
-        email,
-        name,
-        password,
-        schoolId,
-        role,
-      });
-      return userId as Id<"users">;
-    }
-    void ensureUser;
-
     const adminId = await ctx.runMutation(internal.seedHelpers.ensureUserRecord, {
       email: "admin@greenfield.ac.ke", name: "Diana Muthoni", role: "school_admin", schoolId: greenfieldId,
     });
@@ -191,8 +179,6 @@ export const seedAll = action({
         email: s.email,
         phone: `+254 7${intBetween(10, 99)} ${intBetween(100, 999)} ${intBetween(100, 999)}`,
         hireDate: `20${intBetween(18, 24)}-0${intBetween(1, 9)}-1${intBetween(0, 8)}`,
-        userId: undefined,
-        accountPassword: undefined,
       });
       staffIds.push(id as Id<"staff">);
     }
@@ -372,7 +358,7 @@ export const seedAll = action({
       schoolId: riversideId, employeeNumber: "RS-101", firstName: "Miriam", lastName: "Atieno",
       gender: "female", jobTitle: "Teacher", department: "Mathematics", employmentType: "permanent",
       employmentStatus: "active", email: "miriam.atieno@riverside.ac.ke", phone: "+254 722 000 111",
-      hireDate: "2021-01-04", userId: undefined, accountPassword: undefined,
+      hireDate: "2021-01-04",
     });
     const rvStudent = await ctx.runMutation(internal.seedHelpers.insertStudent, {
       schoolId: riversideId, admissionNumber: "RS-2026-001", firstName: "Tom", lastName: "Owira",

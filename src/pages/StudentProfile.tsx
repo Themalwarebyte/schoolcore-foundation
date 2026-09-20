@@ -151,7 +151,7 @@ function GuardiansTab({ studentId }: { studentId: string }) {
           </p>
         ) : (
           <div className="divide-y">
-            {links.map((g) => (
+            {links.filter((g) => g !== null).map((g) => (
               <div key={g.linkId} className="flex items-center justify-between py-3">
                 <div className="min-w-0">
                   <Link to={`/guardians/${g.guardianId}`} className="text-sm font-medium hover:underline">

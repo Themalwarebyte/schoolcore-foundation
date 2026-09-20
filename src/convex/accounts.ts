@@ -274,7 +274,7 @@ export const adminResetPasswordAction = action({
     });
     const target = await ctx.runQuery(internal.accounts.getUserAccessInfo, { userId });
     if (!session.isPlatform) {
-      if (!target.schoolIds.includes(session.schoolId as string)) {
+      if (!session.schoolId || !target.schoolIds.includes(session.schoolId)) {
         throw new ConvexError("This user is not part of your school.");
       }
       if (target.isSuperAdmin) {
