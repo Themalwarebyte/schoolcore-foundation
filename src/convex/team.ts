@@ -88,7 +88,7 @@ export const createUser = action({
       throw new ConvexError("Only an administrator can create school administrators.");
     }
     const { createAccount } = await import("@convex-dev/auth/server");
-    const userId = await ctx.runMutation(internal.accounts.ensureUserRecordInternal, {
+    const userRecordId: Id<"users"> = await ctx.runMutation(internal.accounts.ensureUserRecordInternal, {
       email: normalized,
       name,
     });
@@ -103,7 +103,7 @@ export const createUser = action({
       });
     }
     await ctx.runMutation(internal.accounts.addMembershipInternal, {
-      userId,
+      userId: userRecordId,
       schoolId: session.schoolId ?? undefined,
       role,
       createdById: session.userId,
@@ -113,10 +113,10 @@ export const createUser = action({
       schoolId: session.schoolId ?? undefined,
       action: "user.created",
       entityType: "users",
-      entityId: userId,
+      entityId: userRecordId,
       description: `Created ${role} account for ${normalized}`,
     });
-    return userId;
+    return userRecordId;
   },
 });
 

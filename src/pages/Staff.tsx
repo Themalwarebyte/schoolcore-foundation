@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Link } from "react-router";
 import { toast } from "sonner";
@@ -125,7 +125,7 @@ function StatusBadgeLabel(s: string): string {
 
 function AddStaffDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const create = useMutation(api.staff.create);
-  const ensureAccount = useMutation(api.team.createUser);
+  const provisionAccount = useAction(api.team.createUser);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     employeeNumber: "", firstName: "", lastName: "", gender: "female",
@@ -153,18 +153,15 @@ function AddStaffDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
         createAccount: form.createAccount,
         accountPassword: form.accountPassword || undefined,
       });
-      // Provision the password account via the action-based flow.
+      // Provision the password account via the action-based flow so the
+      // linked login actually works.
       if (form.createAccount && form.email && form.accountPassword) {
-        try {
-          await ensureAccount({
-            email: form.email,
-            name: `${form.firstName} ${form.lastName}`.trim(),
-            role: "teacher",
-            password: form.accountPassword,
-          });
-        } catch {
-          // Membership already exists; account creation may still succeed.
-        }
+        await provisionAccount({
+          email: form.email,
+          name: `${form.firstName} ${form.lastName}`.trim(),
+          role: "teacher",
+          password: form.accountPassword,
+        });
       }
       toast.success("Staff member added");
       onOpenChange(false);

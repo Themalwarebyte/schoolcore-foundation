@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
@@ -44,11 +44,11 @@ export default function Users() {
     paginationOpts: { numItems: PAGE_SIZE, cursor: page === 0 ? null : String(page) },
   });
 
+  const createUserAction = useAction(api.team.createUser);
   const changeRole = useMutation(api.team.changeRole);
   const setActive = useMutation(api.team.setActive);
-  const resetAction = useMutation(api.accounts.adminResetPasswordAction);
-
-  const rows = users?.page.map((u) => ({
+  const resetAction = useAction(api.accounts.adminResetPasswordAction);
+  const rows = users?.page.filter((u) => u !== null).map((u) => ({
     _id: u.membershipId,
     name: (
       <div>
@@ -222,14 +222,14 @@ export default function Users() {
 }
 
 function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
-  const createUser = useMutation(api.team.createUser);
+  const createUserAction = useAction(api.team.createUser);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", role: "teacher", password: "" });
 
   const handleCreate = async () => {
     setSaving(true);
     try {
-      await createUser(form);
+      await createUserAction(form);
       toast.success("User created", { description: `${form.email} can now sign in.` });
       onOpenChange(false);
       setForm({ name: "", email: "", role: "teacher", password: "" });

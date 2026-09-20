@@ -76,7 +76,7 @@ export default function GuardianProfile() {
               <p className="py-6 text-center text-sm text-muted-foreground">No children linked yet.</p>
             ) : (
               <div className="divide-y">
-                {guardian.children.map((c) => (
+                {guardian.children.filter((c) => c !== null).map((c) => (
                   <ChildRow key={c.linkId} child={c} guardianId={guardian._id} />
                 ))}
               </div>

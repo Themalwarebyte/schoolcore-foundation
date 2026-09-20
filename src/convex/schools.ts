@@ -1,5 +1,6 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { action, mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { requirePermission, getSession, requireSchoolSession } from "./session";
 import { recordAudit } from "./audit";
@@ -16,10 +17,28 @@ export const listSchools = query({
   handler: async (ctx, { search, status }) => {
     const session = await requirePermission(ctx, "platform.schools.view");
     if (!session.isPlatform) {
-      // School users may only see their own school record.
+      // School users may only see their own school record (with counts).
       if (session.schoolId) {
         const school = await ctx.db.get(session.schoolId);
-        return school && (!status || school.status === status) ? [school] : [];
+        if (!school || (status && school.status !== status)) return [];
+        const students = await ctx.db
+          .query("students")
+          .withIndex("by_school", (q) => q.eq("schoolId", school._id))
+          .collect();
+        const staff = await ctx.db
+          .query("staff")
+          .withIndex("by_school", (q) => q.eq("schoolId", school._id))
+          .collect();
+        const members = await ctx.db
+          .query("schoolMemberships")
+          .withIndex("by_school", (q) => q.eq("schoolId", school._id))
+          .collect();
+        return [{
+          ...school,
+          studentCount: students.length,
+          staffCount: staff.length,
+          userCount: members.length,
+        }];
       }
       return [];
     }
@@ -168,11 +187,30 @@ export const createSchool = mutation({
 });
 
 /** After createSchool, provision the admin's password credentials (action ctx). */
-export const ensureAdminAccount = mutation({
+export const provisionAdminAccount = action({
   args: { email: v.string(), password: v.string() },
-  handler: async (ctx) => {
-    void ctx;
-    throw new ConvexError("Internal use only; see ensureAdminAccountAction.");
+  handler: async (ctx, { email, password }) => {
+    // Actions cannot use requirePermission directly; verify via internal query
+    // which throws when the caller lacks the permission.
+    await ctx.runQuery(internal.accounts.sessionInfo, {
+      permission: "platform.schools.manage",
+    });
+    const normalized = email.trim().toLowerCase();
+    if (password.length < 8) {
+      throw new ConvexError("Administrator password must be at least 8 characters.");
+    }
+    const { createAccount } = await import("@convex-dev/auth/server");
+    const hasAccount = await ctx.runQuery(internal.accounts.hasPasswordAccount, {
+      email: normalized,
+    });
+    if (!hasAccount) {
+      await createAccount(ctx, {
+        provider: "password",
+        account: { id: normalized, secret: password },
+        profile: { email: normalized },
+      });
+    }
+    return null;
   },
 });
 
@@ -337,5 +375,3 @@ export const platformStats = query({
     };
   },
 });
-
-export { internal } from "./_generated/api";

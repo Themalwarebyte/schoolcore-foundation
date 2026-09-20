@@ -52,7 +52,7 @@ export default function Students() {
   const students = useQuery(api.students.list, {
     search: debounced || undefined,
     status,
-    classSectionId: classSectionId === "all" ? undefined : classSectionId,
+    classSectionId: classSectionId === "all" ? undefined : (classSectionId as never),
     paginationOpts: { numItems: PAGE_SIZE, cursor: page === 0 ? null : String(page) },
   });
 
@@ -210,7 +210,7 @@ export default function Students() {
         open={addOpen}
         onOpenChange={setAddOpen}
         form={form}
-        setForm={setForm}
+        setForm={setForm as React.Dispatch<React.SetStateAction<Record<string, string>>>}
         saving={saving}
         onSubmit={handleCreate}
       />
