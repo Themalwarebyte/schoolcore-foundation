@@ -84,7 +84,7 @@ function infoGrid(doc: jsPDF, data: ReportCardPdfData, startY: number): number {
     ["Class", data.classLabel],
     ["Term End", data.termEndDate ?? "—"],
   ];
-  let y = startY;
+  const y = startY;
   const colW = (PW - M * 2) / 2;
   cols.forEach(([label, value], i) => {
     const x = M + (i % 2) * colW;
@@ -104,7 +104,7 @@ function infoGrid(doc: jsPDF, data: ReportCardPdfData, startY: number): number {
 function attendanceBox(doc: jsPDF, data: ReportCardPdfData, startY: number): number {
   const a = data.card.attendance;
   if (!data.settings.showAttendance || !a) return startY;
-  let y = startY;
+  const y = startY;
   doc.setFillColor(241, 245, 249);
   doc.roundedRect(M, y, PW - M * 2, 13, 1.5, 1.5, "F");
   doc.setFont("helvetica", "bold");
@@ -205,7 +205,7 @@ function subjectTable(doc: jsPDF, data: ReportCardPdfData, startY: number): numb
 }
 
 function summaryRow(doc: jsPDF, data: ReportCardPdfData, startY: number): number {
-  let y = startY;
+  const y = startY;
   const cells: [string, string][] = [
     ["OVERALL AVERAGE", data.card.overallAverage != null ? `${data.card.overallAverage}%` : "—"],
     ["OVERALL GRADE", data.card.overallGrade ?? "—"],
