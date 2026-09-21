@@ -85,16 +85,34 @@ bunx convex dev --once       # typecheck + push functions, regenerate _generated
 
 ### Environment variables
 
-Copy `.env.example`-style values into your platform secret manager (the Keys/API
-Keys UI in this environment). Never commit real secrets.
+All secrets are managed through the platform secret manager (the Keys/API Keys UI
+in this environment) or the Convex deployment environment — **never committed to
+the repository**. `.env.example` (if present) must contain placeholders only.
 
-| Variable                  | Purpose                                                |
-| ------------------------- | ------------------------------------------------------ |
-| `VITE_CONVEX_URL`         | Convex deployment URL used by the browser              |
-| `PLATFORM_ADMIN_EMAIL`    | Bootstrap super admin email (default `admin@schoolcore.dev`) |
-| `PLATFORM_ADMIN_NAME`     | Bootstrap super admin name                             |
-| `PLATFORM_ADMIN_PASSWORD` | Bootstrap super admin password (dev default `ChangeMe!2026`) |
-| `SEED_SECRET`             | Guard for the seed action (`schoolcore-dev-seed`)      |
+**Frontend hosting environment** (build-time, `VITE_`-prefixed):
+
+| Variable          | Purpose                                     |
+| ----------------- | ------------------------------------------- |
+| `VITE_CONVEX_URL` | Convex deployment URL used by the browser. Must point at the SAME deployment that hosts the auth tables, backend functions and seeded accounts. |
+
+**Convex deployment environment** (server-side; set via the platform/`convex env`):
+
+| Variable                  | Purpose                                                        |
+| ------------------------- | -------------------------------------------------------------- |
+| `JWT_PRIVATE_KEY`, `JWKS` | Convex Auth token signing keys (provisioned automatically by the platform; never hardcode or commit). |
+| `PLATFORM_ADMIN_EMAIL`    | Bootstrap super admin email (default `admin@schoolcore.dev`).   |
+| `PLATFORM_ADMIN_NAME`     | Bootstrap super admin name.                                     |
+| `PLATFORM_ADMIN_PASSWORD` | Bootstrap super admin password (dev default `ChangeMe!2026`).   |
+| `SEED_SECRET`             | Guard for the seed action (dev default `schoolcore-dev-seed`).  |
+
+Do **not** set Convex system variables by hand: `CONVEX_SITE_URL` (the deployment's
+`*.convex.site` HTTP-actions domain) and `CONVEX_DEPLOYMENT_NAME` are provided by
+Convex itself. `auth.config.ts` reads `process.env.CONVEX_SITE_URL` at runtime —
+never point it at the frontend URL or `localhost`. If a frontend origin is needed,
+set a separate custom variable (e.g. `SITE_URL=https://schoolcore.freebuff.app/`).
+
+**Local development only:** a local `.env` (git-ignored) may hold `VITE_CONVEX_URL`
+for a local dev deployment. Never place production secrets in any committed file.
 
 ### Database setup & migrations
 
@@ -106,8 +124,11 @@ bunx convex dev --once          # push schema + functions (creates tables & inde
 bunx convex run seed:seedAll '{"secret":"schoolcore-dev-seed"}'
 ```
 
-The seed is idempotent — it skips if schools already exist. Changing the schema and
-pushing again migrates the deployment (with schema validation on indexes).
+The seed is idempotent — it skips if schools already exist, but **always**
+re-ensures the bootstrap super admin and self-heals every documented demo account
+(role membership attached to the exact user row the password account resolves to,
+active status restored) before skipping. Changing the schema and pushing again
+migrates the deployment (with schema validation on indexes).
 
 ### Production build
 
@@ -169,23 +190,43 @@ admin; signing in as either only ever returns that school's data.
 
 ## Testing
 
-A backend smoke-test script covers authentication, RBAC and tenant isolation against
-the live deployment. Run it after seeding:
+A full end-to-end authentication suite lives in `scripts/e2e-auth.mjs`. It seeds
+(idempotently) and then verifies against a live backend:
 
 ```bash
-bunx convex run seed:seedAll '{"secret":"schoolcore-dev-seed"}'
-bun run scripts/smoke.ts
+bun scripts/e2e-auth.mjs https://<deployment>.convex.cloud
 ```
 
-The script verifies:
+The suite verifies:
 
-- **Auth:** valid login succeeds; invalid password fails; disabled users rejected.
-- **RBAC:** teacher cannot call admin functions; school admin cannot act platform-wide.
-- **Tenant isolation:** Greenfield's admin cannot read Riverside's students/guardians;
-  forged cross-school IDs are rejected.
-- **CRUD:** student create/update/archive, duplicate admission numbers rejected,
-  guardian linking shared across siblings, enrollment history, staff creation,
-  allocation uniqueness, academic structure creation.
+- **Seeding:** idempotent; no duplicate schools/users on re-run.
+- **Auth:** valid sign-in issues tokens; sessions resolve (`team:me`); a fresh
+  client with the stored JWT still resolves the same user (refresh persistence);
+  invalid password and unknown users are rejected; disabled users cannot
+  authenticate (enforced inside the credentials provider itself); admin-created
+  users can sign in (no public signup); logout invalidates the refresh token.
+- **Tenant isolation:** school admins only ever see their own school's students;
+  cross-school reads by forged IDs are rejected.
+
+## Security notes
+
+- A previously committed `.env.keys` (containing a `DOTENV_PRIVATE_KEY_LOCAL`)
+  has been **untracked and deleted from the working tree**, and `.gitignore` now
+  excludes `.env*` (except `.env.example`) plus all private-key file types.
+  Because the key was public, it must be treated as compromised: **rotate it**
+  (`npx dotenvx rotate` or regenerate in the dotenvx dashboard) and rotate any
+  secret it could decrypt. If the repository is mirrored on GitHub, also purge
+  the blob from history (`git filter-repo` / BFG) — removing it from `HEAD` alone
+  does not make the old key safe.
+- A hardcoded email-OTP API key in `src/convex/auth/emailOtp.ts` was replaced
+  with `process.env.VLY_EMAIL_OTP_API_KEY` (set via the platform Keys UI). The
+  previously committed value should be **rotated** as well, since it was public
+  in history. SchoolCore's admin-only sign-in does not use email OTP.
+- Sign-in uses a custom sign-in-only credentials provider: there is **no public
+  sign-up flow** at any layer (the stock Password provider's `signUp` flow is
+  disabled), and disabled users are rejected during token issuance.
+- Secrets live only in the platform secret manager / deployment environment;
+  `JWT_PRIVATE_KEY`/`JWKS` are platform-provisioned and never appear in source.
 
 ## Phase 1 feature checklist
 

@@ -46,12 +46,30 @@ export const seedAll = action({
       throw new Error("Invalid seed secret.");
     }
     const existingSchools = await ctx.runQuery(internal.seedHelpers.countSchools, {});
-    if (existingSchools > 0) {
-      return { skipped: true as const, message: "Seed data already present." };
-    }
 
-    // 0. Bootstrap super admin.
+    // Always ensure the platform super admin exists (idempotent), even when
+    // school data is already present. This repairs deployments seeded before
+    // the bootstrap step existed (e.g. a super admin with no membership).
     await ctx.runAction(internal.accounts.ensureBootstrapAdmin, {});
+
+    if (existingSchools > 0) {
+      // Self-heal already-seeded databases: make sure every documented demo
+      // account resolves to a user that holds the right membership (legacy
+      // rows may have memberships on a different duplicate user record).
+      const gfId = await ctx.runQuery(internal.seedHelpers.findSchoolByCode, { code: "GRN-001" });
+      const rvId = await ctx.runQuery(internal.seedHelpers.findSchoolByCode, { code: "RVS-002" });
+      const reaccounts = [
+        { email: "admin@greenfield.ac.ke", password: "Greenfield#2026", role: "school_admin", schoolId: gfId ?? undefined },
+        { email: "principal@greenfield.ac.ke", password: "Greenfield#2026", role: "principal", schoolId: gfId ?? undefined },
+        { email: "accounts@greenfield.ac.ke", password: "Greenfield#2026", role: "accountant", schoolId: gfId ?? undefined },
+        { email: "grace.wanjiku@greenfield.ac.ke", password: "Greenfield#2026", role: "teacher", schoolId: gfId ?? undefined },
+        { email: "admin@riverside.ac.ke", password: "Riverside#2026", role: "school_admin", schoolId: rvId ?? undefined },
+      ];
+      for (const acct of reaccounts) {
+        await ctx.runAction(internal.accounts.ensureDemoAccountAccess, acct);
+      }
+      return { skipped: true as const, message: "Seed data already present. Bootstrap admin + demo accounts ensured." };
+    }
     const superAdminId = await ctx.runQuery(internal.seedHelpers.findUserByEmail, {
       email: (process.env.PLATFORM_ADMIN_EMAIL ?? "admin@schoolcore.dev").trim().toLowerCase(),
     });
@@ -85,23 +103,21 @@ export const seedAll = action({
     });
 
     /* ---------------- Users ---------------- */
-    const adminId = await ctx.runMutation(internal.seedHelpers.ensureUserRecord, {
-      email: "admin@greenfield.ac.ke", name: "Diana Muthoni", role: "school_admin", schoolId: greenfieldId,
+    // Every demo account goes through ensureDemoAccountAccess so the role
+    // membership always lands on the user row the password account resolves
+    // to (self-healing against legacy duplicate user records).
+    const adminId = await ctx.runAction(internal.accounts.ensureDemoAccountAccess, {
+      email: "admin@greenfield.ac.ke", password: "Greenfield#2026", role: "school_admin", schoolId: greenfieldId,
     });
-    await ctx.runMutation(internal.seedHelpers.ensureUserRecord, {
-      email: "principal@greenfield.ac.ke", name: "Robert Kariuki", role: "principal", schoolId: greenfieldId,
+    await ctx.runAction(internal.accounts.ensureDemoAccountAccess, {
+      email: "principal@greenfield.ac.ke", password: "Greenfield#2026", role: "principal", schoolId: greenfieldId,
     });
-    await ctx.runMutation(internal.seedHelpers.ensureUserRecord, {
-      email: "accounts@greenfield.ac.ke", name: "Alice Chebet", role: "accountant", schoolId: greenfieldId,
+    await ctx.runAction(internal.accounts.ensureDemoAccountAccess, {
+      email: "accounts@greenfield.ac.ke", password: "Greenfield#2026", role: "accountant", schoolId: greenfieldId,
     });
-    await ctx.runMutation(internal.seedHelpers.ensureUserRecord, {
-      email: "admin@riverside.ac.ke", name: "Peter Ouma", role: "school_admin", schoolId: riversideId,
+    await ctx.runAction(internal.accounts.ensureDemoAccountAccess, {
+      email: "admin@riverside.ac.ke", password: "Riverside#2026", role: "school_admin", schoolId: riversideId,
     });
-    await ctx.runAction(internal.accounts.ensurePasswordAccount, { email: "admin@greenfield.ac.ke", password: "Greenfield#2026" });
-    await ctx.runAction(internal.accounts.ensurePasswordAccount, { email: "principal@greenfield.ac.ke", password: "Greenfield#2026" });
-    await ctx.runAction(internal.accounts.ensurePasswordAccount, { email: "accounts@greenfield.ac.ke", password: "Greenfield#2026" });
-    await ctx.runAction(internal.accounts.ensurePasswordAccount, { email: "admin@riverside.ac.ke", password: "Riverside#2026" });
-    void adminId;
 
     /* ---------------- Academic structure: Greenfield ---------------- */
     const year2026 = await ctx.runMutation(internal.seedHelpers.insertYear, {
@@ -114,7 +130,7 @@ export const seedAll = action({
       schoolId: greenfieldId, academicYearId: year2026 as Id<"academicYears">, name: "Term 1",
       startDate: "2026-01-05", endDate: "2026-04-03", displayOrder: 1,
     });
-    const term2 = await ctx.runMutation(internal.seedHelpers.insertTerm, {
+    await ctx.runMutation(internal.seedHelpers.insertTerm, {
       schoolId: greenfieldId, academicYearId: year2026 as Id<"academicYears">, name: "Term 2",
       startDate: "2026-05-04", endDate: "2026-08-07", displayOrder: 2,
     });
@@ -182,20 +198,17 @@ export const seedAll = action({
       });
       staffIds.push(id as Id<"staff">);
     }
-    // Give one teacher a login account.
-    await ctx.runMutation(internal.seedHelpers.ensureUserRecord, {
+    // Give one teacher a login account, linked to their staff record through
+    // the user the password account resolves to.
+    const graceUserId = await ctx.runAction(internal.accounts.ensureDemoAccountAccess, {
       email: "grace.wanjiku@greenfield.ac.ke",
-      name: "Grace Wanjiku",
+      password: "Greenfield#2026",
       role: "teacher",
       schoolId: greenfieldId,
     });
-    await ctx.runAction(internal.accounts.ensurePasswordAccount, {
-      email: "grace.wanjiku@greenfield.ac.ke",
-      password: "Greenfield#2026",
-    });
-    await ctx.runMutation(internal.seedHelpers.linkStaffUser, {
+    await ctx.runMutation(internal.seedHelpers.linkStaffUserById, {
       staffId: staffIds[0],
-      email: "grace.wanjiku@greenfield.ac.ke",
+      userId: graceUserId,
     });
 
     /* ---------------- Class sections: Greenfield ---------------- */

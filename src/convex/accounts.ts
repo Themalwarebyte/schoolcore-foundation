@@ -34,10 +34,13 @@ export const sessionInfo = internalQuery({
 export const findUserByEmailInternal = internalQuery({
   args: { email: v.string() },
   handler: async (ctx, { email }) => {
-    const user = await ctx.db
+    // collect() + first instead of unique(): tolerate legacy duplicate rows
+    // so bootstrap/repair never crashes on pre-unique-index data.
+    const users = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", email))
-      .unique();
+      .collect();
+    const user = users[0];
     if (!user) return null;
     return { userId: user._id, email: user.email ?? null, name: user.name ?? null };
   },
@@ -64,8 +67,8 @@ export const ensureUserRecordInternal = internalMutation({
     const existing = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", normalized))
-      .unique();
-    if (existing) return existing._id;
+      .collect();
+    if (existing.length > 0) return existing[0]._id;
     return await ctx.db.insert("users", {
       email: normalized,
       name: name ?? normalized.split("@")[0],
@@ -158,27 +161,31 @@ const BOOTSTRAP_NAME = process.env.PLATFORM_ADMIN_NAME ?? "Platform Administrato
 export const ensureBootstrapAdmin = internalAction({
   args: {},
   handler: async (ctx) => {
-    const existing = await ctx.runQuery(internal.accounts.findUserByEmailInternal, {
-      email: BOOTSTRAP_EMAIL,
-    });
+    // Resolve the user through the password account when it exists: that is
+    // the exact user record sign-in will resolve to, so the super_admin
+    // membership must land there (duplicate legacy user rows are tolerated).
+    const account = await retrieveAccount(ctx, {
+      provider: "password",
+      account: { id: BOOTSTRAP_EMAIL },
+    }).catch(() => null);
     let userId: Id<"users">;
-    if (existing) {
-      userId = existing.userId;
+    if (account) {
+      userId = account.user._id as Id<"users">;
     } else {
-      userId = await ctx.runMutation(internal.accounts.ensureUserRecordInternal, {
-        email: BOOTSTRAP_EMAIL,
-        name: BOOTSTRAP_NAME,
-      });
-    }
-    const hasAccount = await ctx.runQuery(internal.accounts.hasPasswordAccount, {
-      email: BOOTSTRAP_EMAIL,
-    });
-    if (!hasAccount) {
+      // Let createAccount create the user row it links to, then re-resolve:
+      // pre-creating a user row separately risks the membership landing on a
+      // different duplicate user record than the one sign-in resolves to.
       await createAccount(ctx, {
         provider: "password",
         account: { id: BOOTSTRAP_EMAIL, secret: BOOTSTRAP_PASSWORD },
         profile: { email: BOOTSTRAP_EMAIL, name: BOOTSTRAP_NAME },
       });
+      const created = await retrieveAccount(ctx, {
+        provider: "password",
+        account: { id: BOOTSTRAP_EMAIL },
+      }).catch(() => null);
+      if (!created) throw new ConvexError("Failed to bootstrap the platform admin.");
+      userId = created.user._id as Id<"users">;
     }
     await ctx.runMutation(internal.accounts.addMembershipInternal, {
       userId,
@@ -202,6 +209,64 @@ export const ensurePasswordAccount = internalAction({
         account: { id: normalized, secret: password },
         profile: { email: normalized },
       });
+    }
+  },
+});
+
+/**
+ * Ensure a demo/admin-provisioned account is fully usable. Idempotent and
+ * self-healing: guarantees (1) the password account exists, (2) the role
+ * membership is attached to the exact user row the password account resolves
+ * to (tolerating legacy duplicate user rows from earlier seed runs), and
+ * (3) the user is active. Returns the resolved user id.
+ */
+export const ensureDemoAccountAccess = internalAction({
+  args: {
+    email: v.string(),
+    password: v.string(),
+    role: v.string(),
+    schoolId: v.optional(v.id("schools")),
+  },
+  handler: async (ctx, { email, password, role, schoolId }) => {
+    const normalized = email.trim().toLowerCase();
+    let account = await retrieveAccount(ctx, {
+      provider: "password",
+      account: { id: normalized },
+    }).catch(() => null);
+    if (!account) {
+      await createAccount(ctx, {
+        provider: "password",
+        account: { id: normalized, secret: password },
+        profile: { email: normalized },
+      });
+      account = await retrieveAccount(ctx, {
+        provider: "password",
+        account: { id: normalized },
+      });
+    }
+    if (!account) {
+      throw new ConvexError(`Could not create the account for ${normalized}.`);
+    }
+    const userId = account.user._id as Id<"users">;
+    await ctx.runMutation(internal.accounts.addMembershipInternal, {
+      userId,
+      role,
+      schoolId,
+    });
+    await ctx.runMutation(internal.accounts.setUserActiveInternal, {
+      userId,
+      isActive: true,
+    });
+    return userId;
+  },
+});
+
+export const setUserActiveInternal = internalMutation({
+  args: { userId: v.id("users"), isActive: v.boolean() },
+  handler: async (ctx, { userId, isActive }) => {
+    const user = await ctx.db.get(userId);
+    if (user && user.isActive !== isActive) {
+      await ctx.db.patch(userId, { isActive });
     }
   },
 });
@@ -269,12 +334,31 @@ export const checkCredentials = action({
   args: { email: v.string(), password: v.string() },
   handler: async (ctx, { email, password }) => {
     const normalized = email.trim().toLowerCase();
-    const account = await retrieveAccount(ctx, {
-      provider: "password",
-      account: { id: normalized, secret: password },
-    });
+    let account: Awaited<ReturnType<typeof retrieveAccount>>;
+    try {
+      account = await retrieveAccount(ctx, {
+        provider: "password",
+        account: { id: normalized, secret: password },
+      });
+    } catch {
+      // retrieveAccount throws InvalidSecret when the account exists but the
+      // password does not match.
+      return { ok: false as const, reason: "invalid" as const };
+    }
     if (account === null) {
       return { ok: false as const, reason: "invalid" as const };
+    }
+    // The password account's user is the exact row sign-in resolves to;
+    // fall back to the email index only if it has no linked user.
+    const accountUserId = account.user?._id as Id<"users"> | undefined;
+    if (accountUserId) {
+      const active = await ctx.runQuery(internal.accounts.isUserActive, {
+        userId: accountUserId,
+      });
+      if (!active) {
+        return { ok: false as const, reason: "disabled" as const };
+      }
+      return { ok: true as const };
     }
     const user = await ctx.runQuery(internal.accounts.findUserByEmailInternal, {
       email: normalized,
@@ -297,11 +381,16 @@ export const verifyCredentials = internalAction({
   args: { email: v.string(), password: v.string() },
   handler: async (ctx, { email, password }) => {
     const normalized = email.trim().toLowerCase();
-    const result = await retrieveAccount(ctx, {
-      provider: "password",
-      account: { id: normalized, secret: password },
-    });
-    return result !== null;
+    try {
+      const result = await retrieveAccount(ctx, {
+        provider: "password",
+        account: { id: normalized, secret: password },
+      });
+      return result !== null;
+    } catch {
+      // InvalidSecret: account exists but password is wrong.
+      return false;
+    }
   },
 });
 
