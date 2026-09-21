@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { useConvexAuth } from "convex/react";
+import { useAction, useConvexAuth, useQuery } from "convex/react";
 import { useAuthActions } from "@convex-dev/auth/react";
+import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,6 +14,10 @@ interface AuthProps {
   redirectAfterAuth?: string;
 }
 
+const INVALID_MESSAGE = "Invalid email or password.";
+const DISABLED_MESSAGE = "Your account has been disabled. Contact your administrator.";
+const GENERIC_MESSAGE = "We couldn't sign you in right now. Please try again.";
+
 function resolveRedirectAfterAuth(returnTo: string | null, fallback = "/dashboard") {
   if (returnTo?.startsWith("/") && !returnTo.startsWith("//")) return returnTo;
   return fallback;
@@ -20,7 +25,8 @@ function resolveRedirectAfterAuth(returnTo: string | null, fallback = "/dashboar
 
 function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const { isLoading: convexLoading, isAuthenticated } = useConvexAuth();
-  const { signIn } = useAuthActions();
+  const { signIn, signOut } = useAuthActions();
+  const checkCredentials = useAction(api.accounts.checkCredentials);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const redirect = resolveRedirectAfterAuth(searchParams.get("returnTo"), redirectAfterAuth);
@@ -30,26 +36,59 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Signed-in users land on their destination. The /dashboard fallback is a
+  // universal entry point: the school layout immediately forwards platform
+  // super admins (no school membership) to the platform dashboard.
   useEffect(() => {
     if (!convexLoading && isAuthenticated) {
       navigate(redirect, { replace: true });
     }
   }, [convexLoading, isAuthenticated, navigate, redirect]);
 
+  // If sign-in succeeds but the account record is missing or disabled, the
+  // session is unusable: show the disabled message and clear the session.
+  const me = useQuery(api.accounts.myMemberships);
+  useEffect(() => {
+    if (!convexLoading && isAuthenticated && me === null) {
+      setError(DISABLED_MESSAGE);
+      void signOut();
+    }
+  }, [convexLoading, isAuthenticated, me, signOut]);
+
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsLoading(true);
     setError(null);
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // Pre-check credentials server-side so the user gets a precise, friendly
+    // message. Convex production masks raw auth:signIn errors, so without this
+    // we could not distinguish a wrong password from a disabled account. The
+    // check is read-only — no session is created here.
     try {
-      await signIn("password", { email: email.trim().toLowerCase(), password, flow: "signIn" });
+      const check = await checkCredentials({ email: normalizedEmail, password });
+      if (check && !check.ok) {
+        setError(check.reason === "disabled" ? DISABLED_MESSAGE : INVALID_MESSAGE);
+        setIsLoading(false);
+        return;
+      }
+    } catch {
+      // Best-effort only: fall through to the real sign-in flow.
+    }
+
+    try {
+      await signIn("password", { email: normalizedEmail, password, flow: "signIn" });
       navigate(redirect, { replace: true });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Sign in failed.";
-      setError(
-        message.toLowerCase().includes("invalid")
-          ? "Incorrect email or password."
-          : message,
-      );
+      // Never surface raw backend errors (request IDs, stacks, DB errors).
+      // Details stay in the browser/dev console only.
+      const raw = err instanceof Error ? err.message : String(err ?? "");
+      if (raw.toLowerCase().includes("invalid")) {
+        setError(INVALID_MESSAGE);
+      } else {
+        console.error("Sign-in failed:", err);
+        setError(GENERIC_MESSAGE);
+      }
       setIsLoading(false);
     }
   };

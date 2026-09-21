@@ -249,6 +249,49 @@ export const myMemberships = query({
 /* Password management (public actions with server-side checks)        */
 /* ------------------------------------------------------------------ */
 
+/** Is the user record active? (disabled accounts cannot sign in) */
+export const isUserActive = internalQuery({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }) => {
+    const user = await ctx.db.get(userId);
+    return !!user && user.isActive !== false;
+  },
+});
+
+/**
+ * Public credential pre-check used by the sign-in page to return precise,
+ * friendly errors. Read-only: it never creates a session — the real sign-in
+ * still goes through auth:signIn. This exists because Convex production
+ * masks plain Error messages from auth:signIn, so the UI cannot distinguish
+ * bad credentials from a disabled account without it.
+ */
+export const checkCredentials = action({
+  args: { email: v.string(), password: v.string() },
+  handler: async (ctx, { email, password }) => {
+    const normalized = email.trim().toLowerCase();
+    const account = await retrieveAccount(ctx, {
+      provider: "password",
+      account: { id: normalized, secret: password },
+    });
+    if (account === null) {
+      return { ok: false as const, reason: "invalid" as const };
+    }
+    const user = await ctx.runQuery(internal.accounts.findUserByEmailInternal, {
+      email: normalized,
+    });
+    if (!user) {
+      return { ok: false as const, reason: "invalid" as const };
+    }
+    const active = await ctx.runQuery(internal.accounts.isUserActive, {
+      userId: user.userId,
+    });
+    if (!active) {
+      return { ok: false as const, reason: "disabled" as const };
+    }
+    return { ok: true as const };
+  },
+});
+
 /** Verify credentials (used by tests + seed validation). */
 export const verifyCredentials = internalAction({
   args: { email: v.string(), password: v.string() },
