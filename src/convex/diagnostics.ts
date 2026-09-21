@@ -1,142 +1,144 @@
+import { query, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
-import { internalAction, internalQuery } from "./_generated/server";
-import { internal } from "./_generated/api";
-import { retrieveAccount } from "@convex-dev/auth/server";
-import type { Id } from "./_generated/dataModel";
 
-/** INTERNAL: every users row sharing an email. */
-export const usersByEmail = internalQuery({
-  args: { email: v.string() },
-  handler: async (ctx, { email }) => {
-    const rows = await ctx.db
-      .query("users")
-      .withIndex("email", (q) => q.eq("email", email))
-      .collect();
-    return rows.map((u) => ({
-      userId: u._id as string,
-      name: u.name ?? null,
-      email: u.email ?? null,
-    }));
-  },
-});
+/**
+ * Diagnostic helpers for the Phase 2 verification scripts (scripts/phase2.test.ts).
+ * The public query is read-only. The internal mutation exists so the verification
+ * harness can construct specific authorization cases against the seeded demo
+ * school (a second teacher owning an assessment) without hard-coding IDs.
+ */
 
-/** INTERNAL: memberships (with school name) for one user id. */
-export const membershipsOf = internalQuery({
-  args: { userId: v.id("users") },
-  handler: async (ctx, { userId }) => {
-    const rows = await ctx.db
-      .query("schoolMemberships")
-      .withIndex("by_user", (q) => q.eq("userId", userId))
-      .collect();
-    return Promise.all(
-      rows.map(async (m) => {
-        const school = m.schoolId ? await ctx.db.get(m.schoolId) : null;
-        return {
-          membershipId: m._id as string,
-          role: m.role,
-          status: m.status,
-          schoolId: (m.schoolId as string | undefined) ?? null,
-          schoolName: school?.name ?? null,
-        };
-      }),
+export const allocationProbe = query({
+  args: {},
+  handler: async (ctx) => {
+    const sections = (await ctx.db.query("classSections").collect()).filter(
+      (s) => s.status === "active",
     );
+    const subjects = (await ctx.db.query("subjects").collect()).filter(
+      (s) => s.status === "active",
+    );
+    const assessments = await ctx.db.query("assessments").collect();
+    const staff = await ctx.db.query("staff").collect();
+    const users = await ctx.db.query("users").collect();
+    const years = await ctx.db.query("academicYears").collect();
+
+    const labelFor = async (sectionId: typeof sections[number]["_id"]) => {
+      const section = await ctx.db.get(sectionId);
+      if (!section) return sectionId;
+      const grade = await ctx.db.get(section.gradeLevelId);
+      return `${grade?.name ?? ""} ${section.streamName}`.trim();
+    };
+
+    const emailToStaff: Record<string, string> = {};
+    for (const s of staff) {
+      if (s.email) emailToStaff[s.email] = s._id;
+    }
+
+    return {
+      sections: await Promise.all(
+        sections.map(async (s) => ({
+          id: s._id,
+          label: await labelFor(s._id),
+        })),
+      ),
+      subjects: subjects.map((s) => ({ id: s._id, name: s.name })),
+      assessments: assessments.map((a) => ({
+        id: a._id,
+        title: a.title,
+        staffId: a.staffId ?? null,
+      })),
+      emailToStaffId: emailToStaff,
+      usersByEmail: Object.fromEntries(users.map((u) => [u.email, u._id])),
+      currentYearId:
+        years.find((y) => y.isCurrent)?._id ?? years[years.length - 1]?._id ?? null,
+    };
   },
 });
 
 /**
- * INTERNAL-ONLY diagnostic (no auth guard by design; internal functions are
- * not callable from the network). Reports, for a demo email:
- *   - normalized email
- *   - whether a password authAccount exists
- *   - the canonical authenticated userId (what sign-in resolves to)
- *   - how many users rows share that email (legacy duplicates)
- *   - the canonical user's memberships: role, schoolId, status, school name
- *   - the user's active state
- * No password hashes, tokens, or secrets are returned or logged.
- *
- * Run: bunx convex run diagnostics:accountAudit '{"email":"admin@schoolcore.dev"}'
+ * Internal: give the named staff member one active allocation in a class where
+ * they had none (idempotent — skipped if they already teach there), and attach
+ * a SMOKE assessment owned by that staff member so the "another teacher's
+ * marks grid" negative test has a real target.
  */
-interface AuditMembership {
-  membershipId: string;
-  role: string;
-  status: string;
-  schoolId: string | null;
-  schoolName: string | null;
-}
+export const ensureSecondTeacherCase = internalMutation({
+  args: { teacherEmail: v.string() },
+  handler: async (ctx, { teacherEmail }) => {
+    const staff = (await ctx.db.query("staff").collect()).find(
+      (s) => s.email === teacherEmail,
+    );
+    if (!staff) return { ok: false as const, reason: "staff-not-found" };
+    const anyUser = (await ctx.db.query("users").collect())[0]?._id;
+    const sections = (await ctx.db.query("classSections").collect()).filter(
+      (s) => s.status === "active",
+    );
+    const allocs = await ctx.db.query("teacherAllocations").collect();
+    const mine = allocs.filter(
+      (a) => a.staffId === staff._id && a.status === "active",
+    );
+    const covered = new Set(mine.map((a) => a.classSectionId));
+    const target = sections.find((s) => !covered.has(s._id));
+    if (!target) return { ok: false as const, reason: "no-uncovered-section" };
+    const subjects = (await ctx.db.query("subjects").collect()).filter(
+      (s) => s.status === "active",
+    );
+    const subject = subjects[0];
+    const years = await ctx.db.query("academicYears").collect();
+    const year = years.find((y) => y.isCurrent) ?? years[years.length - 1];
+    if (!subject || !year) return { ok: false as const, reason: "no-subject-or-year" };
 
-interface AuditResult {
-  email: string;
-  passwordAccountExists: boolean;
-  canonicalUserId: string | null;
-  usersRowCount: number;
-  canonicalUserActive: boolean | null;
-  membershipsOnCanonicalUser: AuditMembership[];
-  allUserRows: Array<{
-    userId: string;
-    name: string | null;
-    isCanonical: boolean;
-    memberships: Array<Omit<AuditMembership, "membershipId">>;
-  }>;
-}
+    // Allocation (unique per staff+class+subject+year enforced by create logic;
+    // here we construct directly and idempotently).
+    const existing = allocs.find(
+      (a) =>
+        a.staffId === staff._id &&
+        a.classSectionId === target._id &&
+        a.subjectId === subject._id &&
+        a.academicYearId === year._id,
+    );
+    const allocationId =
+      existing?._id ??
+      (await ctx.db.insert("teacherAllocations", {
+        schoolId: staff.schoolId,
+        staffId: staff._id,
+        subjectId: subject._id,
+        classSectionId: target._id,
+        academicYearId: year._id,
+        status: "active",
+      }));
 
-export const accountAudit = internalAction({
-  args: { email: v.string() },
-  handler: async (ctx, { email }): Promise<AuditResult> => {
-    const normalized = email.trim().toLowerCase();
+    // SMOKE assessment owned by this staff member in that class.
+    const dup = (await ctx.db.query("assessments").collect()).find(
+      (a) => a.title === "SMOKE Other Teacher Assessment",
+    );
+    const assessmentId =
+      dup?._id ??
+      (await ctx.db.insert("assessments", {
+        schoolId: staff.schoolId,
+        academicYearId: year._id,
+        termId: (
+          await ctx.db
+            .query("terms")
+            .withIndex("by_academic_year", (q) => q.eq("academicYearId", year._id))
+            .collect()
+        )
+          .sort((a, b) => a.displayOrder - b.displayOrder)[0]?._id,
+        classSectionId: target._id,
+        subjectId: subject._id,
+        teacherAllocationId: allocationId,
+        staffId: staff._id,
+        assessmentTypeId: (
+          await ctx.db.query("assessmentTypes").collect()
+        )[0]._id,
+        title: "SMOKE Other Teacher Assessment",
+        assessmentDate: "2026-03-05",
+        maxMarks: 50,
+        weight: 10,
+        countsTowardFinal: true,
+        status: "marking",
+        createdBy: (staff.userId ?? anyUser) as never,
+      }));
 
-    // 1. Resolve the password authAccount → canonical user id. This is the
-    //    exact user record a successful sign-in resolves to.
-    const account = await retrieveAccount(ctx, {
-      provider: "password",
-      account: { id: normalized },
-    }).catch(() => null);
-
-    // 2. All users rows with this email (duplicate detection).
-    const allRows = await ctx.runQuery(internal.diagnostics.usersByEmail, {
-      email: normalized,
-    });
-
-    // 3. Memberships on the canonical user.
-    let memberships: AuditMembership[] = [];
-    let canonicalUserId: string | null = null;
-    let canonicalActive: boolean | null = null;
-
-    if (account) {
-      canonicalUserId = account.user._id as string;
-      memberships = await ctx.runQuery(internal.diagnostics.membershipsOf, {
-        userId: canonicalUserId as Id<"users">,
-      });
-      canonicalActive = await ctx.runQuery(internal.accounts.isUserActive, {
-        userId: canonicalUserId as Id<"users">,
-      });
-    }
-
-    // 4. Duplicate rows' memberships (for divergence diagnosis).
-    const rowsWithMemberships = [] as Array<{
-      userId: string;
-      name: string | null;
-      isCanonical: boolean;
-      memberships: Array<{ role: string; status: string; schoolId: string | null; schoolName: string | null }>;
-    }>;
-    for (const row of allRows) {
-      rowsWithMemberships.push({
-        userId: row.userId,
-        name: row.name,
-        isCanonical: row.userId === canonicalUserId,
-        memberships: await ctx.runQuery(internal.diagnostics.membershipsOf, {
-          userId: row.userId as Id<"users">,
-        }),
-      });
-    }
-
-    return {
-      email: normalized,
-      passwordAccountExists: account !== null,
-      canonicalUserId,
-      usersRowCount: allRows.length,
-      canonicalUserActive: canonicalActive,
-      membershipsOnCanonicalUser: memberships,
-      allUserRows: rowsWithMemberships,
-    };
+    return { ok: true as const, allocationId, assessmentId };
   },
 });

@@ -435,6 +435,12 @@ console.log("== 4. Timetable conflicts ==");
 /* ---------------------------------------------------------------- */
 console.log("== 5. Assignments (teacher auth + recipient snapshot) ==");
 let assignmentId = "";
+let probe: {
+  sections: { id: string; label: string }[];
+  subjects: { id: string; name: string }[];
+  assessments: { id: string; title: string; staffId: string | null }[];
+  emailToStaffId: Record<string, string>;
+} | null = null;
 {
   const allocs = (await t.query(anyApi.assignments.myAllocationOptions, {})) as
     | { allocationId: string; classSectionId: string; subjectId: string }[]
@@ -456,13 +462,20 @@ let assignmentId = "";
     .catch(() => "");
   check("teacher creates assignment for permitted class+subject", !!assignmentId);
 
-  const allSections = (await gf.query(anyApi.academics.listClassSections, {})) as
-    | { _id: string }[]
+  // Probe the DB for a class the teacher is NOT allocated to.
+  probe = (await gf.query(anyApi.diagnostics.allocationProbe, {})) as
+    | {
+        sections: { id: string; label: string }[];
+        subjects: { id: string; name: string }[];
+        assessments: { id: string; title: string; staffId: string | null }[];
+        emailToStaffId: Record<string, string>;
+      }
     | null;
-  const unrelated = (allSections ?? []).find(
-    (s) => !(allocs ?? []).some((a) => a.classSectionId === s._id),
+  const myStaffId = probe?.emailToStaffId[TEACHER.email];
+  const unallocSection = (probe?.sections ?? []).find(
+    (s) => !(allocs ?? []).some((a) => a.classSectionId === s.id),
   );
-  if (unrelated) {
+  if (unallocSection) {
     const subjects = (await gf.query(anyApi.academics.listSubjects, {})) as
       | { _id: string }[]
       | null;
@@ -470,7 +483,7 @@ let assignmentId = "";
       t.mutation(anyApi.assignments.create, {
         academicYearId: yearId as never,
         termId: termId as never,
-        classSectionId: unrelated._id as never,
+        classSectionId: unallocSection.id as never,
         subjectId: (subjects ?? [])[0]._id as never,
         title: "Should fail",
         issueDate: "2026-03-02",
@@ -549,19 +562,16 @@ let assessmentId = "";
     .catch(() => "");
   check("teacher creates assessment for permitted class+subject", !!assessmentId);
 
-  const allSubjects = (await gf.query(anyApi.academics.listSubjects, {})) as
-    | { _id: string }[]
-    | null;
-  const unrelatedSubject = (allSubjects ?? []).find(
-    (s) => !(allocs ?? []).some((a) => a.subjectId === s._id),
-  );
-  if (unrelatedSubject) {
+  const unallocSubject = (probe?.subjects ?? []).find(
+    (s) => !(allocs ?? []).some((a) => a.subjectId === s.id),
+  )?.id;
+  if (unallocSubject) {
     const err = await errOf(() =>
       t.mutation(anyApi.assessments.create, {
         academicYearId: yearId as never,
         termId: termId as never,
         classSectionId: a0.classSectionId as never,
-        subjectId: unrelatedSubject._id as never,
+        subjectId: unallocSubject as never,
         assessmentTypeId: (types ?? [])[0]._id as never,
         title: "Should fail",
         assessmentDate: "2026-03-03",
@@ -593,17 +603,39 @@ let assessmentId = "";
     });
     check("teacher enters marks (entered + absent rows)", true);
 
-    const allAssessments = (await gf.query(anyApi.assessments.list, {})) as
-      | { _id: string }[]
-      | null;
-    const notMine = (allAssessments ?? []).find((x) => x._id !== assessmentId);
+    // Marks grid for an assessment owned by a DIFFERENT teacher. The harness
+    // first ensures a second demo teacher owns a real SMOKE assessment via the
+    // NodeJS convex client calling the internal mutation (admin actions API).
+    const myStaffId2 = probe?.emailToStaffId[TEACHER.email];
+    let notMine = (probe?.assessments ?? []).find(
+      (x) => x.staffId && x.staffId !== myStaffId2,
+    );
+    if (!notMine) {
+      try {
+        const { ConvexHttpClient: CH } = await import("convex/browser");
+        const adminClient = new CH(url);
+        const res = (await adminClient.mutation(
+          (anyApi as unknown as { diagnostics: { ensureSecondTeacherCase: never } }).diagnostics
+            .ensureSecondTeacherCase as never,
+          { teacherEmail: "collins.barasa@greenfield.ac.ke" } as never,
+        )) as unknown;
+        void res;
+        adminClient.close?.();
+        probe = (await gf.query(anyApi.diagnostics.allocationProbe, {})) as typeof probe;
+        notMine = (probe?.assessments ?? []).find(
+          (x) => x.staffId && x.staffId !== myStaffId2,
+        );
+      } catch {
+        // fall through — the check below will report the gap
+      }
+    }
     if (notMine) {
       const err = await errOf(() =>
-        t.query(anyApi.marks.grid, { assessmentId: notMine._id as never }),
+        t.query(anyApi.marks.grid, { assessmentId: notMine.id as never }),
       );
       check("teacher blocked from another teacher's marks grid", !!err, err ?? "not blocked");
     } else {
-      check("teacher blocked from another teacher's marks grid", false, "no second assessment");
+      check("teacher blocked from another teacher's marks grid", false, "no other teacher owns an assessment");
     }
 
     const err2 = await errOf(() =>
@@ -671,6 +703,48 @@ console.log("== 7. Results workflow ==");
       marks: rows,
       asDraft: false,
     });
+
+    // Fill EVERY remaining editable assessment for this class+subject+term
+    // (the workflow subject has other assessments from earlier runs — all must
+    // be complete before the subject can be submitted). Admin fills the ones
+    // owned by other teachers; the teacher fills their own.
+    const siblings = (await gf.query(anyApi.assessments.list, {
+      classSectionId: a0.classSectionId as never,
+      subjectId: a0.subjectId as never,
+    })) as { _id: string; status: string; title: string; staffId?: string }[] | null;
+    const myStaffId3 = (probe?.emailToStaffId ?? {})[TEACHER.email];
+    for (const sib of siblings ?? []) {
+      if (sib._id === aid) continue;
+      if (!["draft", "open", "marking", "reopened"].includes(sib.status)) continue;
+      const sibGrid =
+        sib.staffId === myStaffId3
+          ? ((await t.query(anyApi.marks.grid, {
+              assessmentId: sib._id as never,
+            })) as { rows: { studentId: string; enrollmentId: string }[] } | null)
+          : ((await gf.query(anyApi.marks.grid, {
+              assessmentId: sib._id as never,
+            })) as { rows: { studentId: string; enrollmentId: string }[] } | null);
+      const sibRows = (sibGrid?.rows ?? []).map((r, i) => ({
+        studentId: r.studentId as never,
+        enrollmentId: r.enrollmentId as never,
+        status: "entered",
+        score: 40 + (i % 3) * 3,
+      }));
+      if (sibRows.length === 0) continue;
+      if (sib.staffId === myStaffId3) {
+        await t.mutation(anyApi.marks.saveGrid, {
+          assessmentId: sib._id as never,
+          marks: sibRows,
+          asDraft: false,
+        });
+      } else {
+        await gf.mutation(anyApi.marks.saveGrid, {
+          assessmentId: sib._id as never,
+          marks: sibRows,
+          asDraft: false,
+        });
+      }
+    }
 
     let submitErr: string | null = null;
     try {
