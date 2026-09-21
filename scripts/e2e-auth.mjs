@@ -28,7 +28,11 @@ const SUPER_ADMIN_EMAIL = "admin@schoolcore.dev";
 const SUPER_ADMIN_PASSWORD = "ChangeMe!2026";
 const GREENFIELD_ADMIN_EMAIL = "admin@greenfield.ac.ke";
 const GREENFIELD_ADMIN_PASSWORD = "Greenfield#2026";
-const SEED_SECRET = process.env.SEED_SECRET ?? "schoolcore-dev-seed";
+const SEED_SECRET = process.env.SEED_SECRET;
+if (!SEED_SECRET) {
+  console.error("SEED_SECRET is required (must match the deployment's configured seed secret).");
+  process.exit(1);
+}
 
 let pass = 0;
 let fail = 0;

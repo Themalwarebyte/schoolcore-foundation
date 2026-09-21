@@ -36,12 +36,22 @@ const OCCUPATIONS = [
 /**
  * Seed the entire demo platform. Guarded by a seed secret so it cannot be
  * invoked casually; skips when data already exists (idempotent).
- * Run: bunx convex run seed:seedAll '{"secret":"schoolcore-dev-seed"}'
+ *
+ * SECURITY: there is deliberately NO fallback secret. If SEED_SECRET is not
+ * configured on the deployment, the seed refuses to run — a repository-visible
+ * default would let anyone invoke this public action in production. Configure
+ * SEED_SECRET through the platform secret manager (a strong random value);
+ * it is never committed to the repository.
  */
 export const seedAll = action({
   args: { secret: v.string() },
   handler: async (ctx, { secret }) => {
-    const expected = process.env.SEED_SECRET ?? "schoolcore-dev-seed";
+    const expected = process.env.SEED_SECRET;
+    if (!expected) {
+      throw new Error(
+        "Seed is not configured on this deployment: SEED_SECRET must be set in the deployment environment before the seed can run.",
+      );
+    }
     if (secret !== expected) {
       throw new Error("Invalid seed secret.");
     }
