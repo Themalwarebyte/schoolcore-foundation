@@ -468,7 +468,7 @@ export const seedAcademicOps = internalMutation({
       if (!settings) {
         await ctx.db.insert("schoolSettings", {
           schoolId: school._id,
-          attendanceMode: "daily",
+          attendanceMode: "both", // demo schools exercise daily + lesson attendance
           schoolDays: ["mon", "tue", "wed", "thu", "fri"],
           editableWindowDays: 7,
           rankingEnabled: true,

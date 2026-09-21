@@ -4,6 +4,7 @@ import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
 import { Link } from "react-router";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
+import { downloadReportCardPdf, downloadClassReportCardsPdf, type ReportCardPdfData } from "@/lib/reportCardPdf";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/lib/status";
@@ -11,7 +12,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { ClassSelect, ScopeBar, TermSelect, YearSelect } from "@/components/ops/Controls";
-import { FileText, Wand2 } from "lucide-react";
+import { Download, FileText, Wand2 } from "lucide-react";
 
 type CardRow = {
   _id: string;
@@ -45,6 +46,38 @@ export default function ReportCards() {
 
   const generate = useMutation(api.reportCards.generate);
   const publish = useMutation(api.reportCards.publish);
+
+  // Class bulk PDF: fetch full documents for all listed cards on demand.
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const downloadClassPdf = async () => {
+    if (!cards || (cards as CardRow[]).length === 0) return;
+    setBulkLoading(true);
+    try {
+      const docs: ReportCardPdfData[] = [];
+      for (const c of cards as CardRow[]) {
+        const full = await fetchCard(c._id);
+        if (full) docs.push(full);
+      }
+      downloadClassReportCardsPdf(docs);
+      toast.success(`Downloaded ${docs.length} report card page(s) as one PDF`);
+    } catch (err) {
+      toast.error("Bulk download failed.", { description: err instanceof Error ? err.message : undefined });
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  async function fetchCard(id: string): Promise<ReportCardPdfData | null> {
+    try {
+      const client = (window as unknown as { __convexClient?: { query: (ref: unknown, args: unknown) => Promise<unknown> } }).__convexClient;
+      if (!client) return null;
+      const anyApiModule = await import("@/convex/_generated/api");
+      const full = await client.query(anyApiModule.api.reportCards.get, { reportCardId: id });
+      return (full as unknown as ReportCardPdfData) ?? null;
+    } catch {
+      return null;
+    }
+  }
 
   return (
     <div className="page-shell">
@@ -109,6 +142,14 @@ export default function ReportCards() {
                 Publish class set
               </Button>
             </Can>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!cards || (cards as CardRow[]).length === 0 || bulkLoading}
+              onClick={downloadClassPdf}
+            >
+              <Download className="size-4" /> {bulkLoading ? "Preparing…" : "Download class PDF"}
+            </Button>
           </div>
         </CardHeader>
         <CardContent>
@@ -149,11 +190,25 @@ export default function ReportCards() {
                     <TableCell>v{c.snapshotVersion}</TableCell>
                     <TableCell><StatusBadge status={c.status} /></TableCell>
                     <TableCell>
-                      <Button asChild variant="outline" size="sm">
-                        <Link to={`/report-cards/${c._id}`}>
-                          <FileText className="size-3.5" /> View
-                        </Link>
-                      </Button>
+                      <div className="flex gap-1">
+                        <Button asChild variant="outline" size="sm">
+                          <Link to={`/report-cards/${c._id}`}>
+                            <FileText className="size-3.5" /> View
+                          </Link>
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          title="Download PDF"
+                          onClick={async () => {
+                            const full = await fetchCard(c._id);
+                            if (full) downloadReportCardPdf(full);
+                            else toast.error("Unable to load the report card document.");
+                          }}
+                        >
+                          <Download className="size-3.5" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}

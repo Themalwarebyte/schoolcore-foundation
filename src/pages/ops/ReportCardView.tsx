@@ -8,7 +8,8 @@ import { StatusBadge } from "@/lib/status";
 import { usePermissions } from "@/hooks/use-session";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { ArrowLeft, Printer } from "lucide-react";
+import { downloadReportCardPdf, type ReportCardPdfData } from "@/lib/reportCardPdf";
+import { ArrowLeft, Download, Printer } from "lucide-react";
 
 type Card = {
   _id: string;
@@ -93,6 +94,13 @@ export default function ReportCardView() {
           <span className="text-xs text-muted-foreground">v{card.snapshotVersion}</span>
           <Button size="sm" onClick={() => window.print()}>
             <Printer className="size-4" /> Print
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => downloadReportCardPdf(data as unknown as ReportCardPdfData)}
+          >
+            <Download className="size-4" /> Download PDF
           </Button>
         </div>
       </div>

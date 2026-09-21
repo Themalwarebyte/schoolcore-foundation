@@ -40,9 +40,11 @@ type Entry = {
   startTime: string;
   endTime: string;
   displayOrder: number;
+  classSectionId: string;
   classLabel: string;
   subjectName: string;
   subjectCode: string;
+  staffId: string | null;
   staffName: string;
   roomName: string | null;
   status: string;
@@ -66,7 +68,7 @@ export default function Timetable() {
             className="capitalize"
             onClick={() => setTab(t)}
           >
-            {t}
+            {t === "grid" ? "Class grid" : t}
           </Button>
         ))}
       </div>
@@ -82,18 +84,26 @@ export default function Timetable() {
 function GridView({ canManage, canPublish }: { canManage: boolean; canPublish: boolean }) {
   const [yearId, setYearId] = useState("");
   const [classSectionId, setClassSectionId] = useState("");
+  const [teacherView, setTeacherView] = useState(false);
   const [includeDrafts, setIncludeDrafts] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const publish = useMutation(api.timetable.publishTimetable);
 
   const entries = useQuery(
     api.timetable.listEntries,
-    { academicYearId: (yearId || undefined) as never, classSectionId: (classSectionId || undefined) as never, includeDrafts },
+    { academicYearId: (yearId || undefined) as never, classSectionId: (teacherView ? undefined : (classSectionId || undefined)) as never, includeDrafts },
   );
   const periods = useQuery(api.timetable.listPeriods, {});
 
-  const byCell = new Map<string, Entry>();
-  for (const e of (entries ?? []) as Entry[]) byCell.set(`${e.dayOfWeek}:${e.periodId}`, e);
+  // Group by row key: class grid → one row per class; teacher view → one row per teacher.
+  const rows = new Map<string, { label: string; cells: Map<string, Entry> }>();
+  for (const e of (entries ?? []) as Entry[]) {
+    const rowKey = teacherView ? `t:${e.staffId ?? "—"}` : `c:${e.classSectionId}`;
+    const rowLabel = teacherView ? e.staffName : e.classLabel;
+    if (!rows.has(rowKey)) rows.set(rowKey, { label: rowLabel, cells: new Map() });
+    rows.get(rowKey)!.cells.set(`${e.dayOfWeek}:${e.periodId}`, e);
+  }
+  const rowList = [...rows.entries()].sort((a, b) => a[1].label.localeCompare(b[1].label));
 
   const draftCount = (entries ?? []).filter((e) => e.status === "draft").length;
 
@@ -101,8 +111,26 @@ function GridView({ canManage, canPublish }: { canManage: boolean; canPublish: b
     <>
       <ScopeBar>
         <YearSelect yearId={yearId} onChange={(v) => { setYearId(v); setClassSectionId(""); }} />
-        <ClassSelect yearId={yearId} classSectionId={classSectionId} onChange={setClassSectionId} />
-        <div className="flex items-end gap-2">
+        {teacherView ? (
+          <div>
+            <Label className="text-xs text-muted-foreground">Scope</Label>
+            <p className="mt-1.5 rounded-md border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+              Whole-school teacher view — every teacher's weekly schedule.
+            </p>
+          </div>
+        ) : (
+          <ClassSelect yearId={yearId} classSectionId={classSectionId} onChange={setClassSectionId} allowAll />
+        )}
+        <div className="flex items-end gap-4">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={teacherView}
+              onChange={(e) => setTeacherView(e.target.checked)}
+              className="size-4"
+            />
+            By teacher
+          </label>
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
@@ -114,7 +142,7 @@ function GridView({ canManage, canPublish }: { canManage: boolean; canPublish: b
           </label>
         </div>
         <div className="flex items-end justify-end gap-2">
-          {canManage && (
+          {canManage && !teacherView && (
             <Button size="sm" onClick={() => setDialogOpen(true)}>
               <Plus className="size-4" /> Add lesson
             </Button>
@@ -143,55 +171,66 @@ function GridView({ canManage, canPublish }: { canManage: boolean; canPublish: b
         <CardContent className="pt-6">
           {entries === undefined || periods === undefined ? (
             <div className="h-64 animate-pulse rounded-lg bg-muted" />
+          ) : rowList.length === 0 ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">
+              No timetable entries for this scope yet.
+            </p>
           ) : (
-            <table className="w-full min-w-[720px] border-separate border-spacing-1">
-              <thead>
-                <tr>
-                  <th className="w-28 text-left text-xs font-medium text-muted-foreground">Period</th>
-                  {DAYS.map((d) => (
-                    <th key={d.key} className="text-xs font-medium text-muted-foreground">{d.label}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {periods.map((p) => (
-                  <tr key={p._id}>
-                    <td className={cn(
-                      "rounded-md border px-2 py-1.5 text-xs",
-                      p.periodType === "teaching" ? "bg-muted/40" : "bg-muted/20 text-muted-foreground",
-                    )}>
-                      <span className="font-medium">{p.name}</span>
-                      <span className="block text-[10px] text-muted-foreground">
-                        {p.startTime}–{p.endTime}
-                      </span>
-                    </td>
-                    {DAYS.map((d) => {
-                      const e = byCell.get(`${d.key}:${p._id}`);
-                      if (!e) {
-                        return (
-                          <td key={d.key} className="rounded-md border border-dashed bg-transparent p-1 text-center text-[10px] text-muted-foreground/50">
-                            {p.periodType === "teaching" ? "—" : ""}
-                          </td>
-                        );
-                      }
-                      return (
-                        <td key={d.key} className="p-0">
-                          <div className={cn(
-                            "h-full rounded-md border px-2 py-1.5 text-xs",
-                            e.status === "draft" ? "border-dashed bg-amber-50 dark:bg-amber-950/30" : "bg-card",
-                          )}>
-                            <p className="font-medium leading-tight">{e.subjectName}</p>
-                            <p className="text-[10px] text-muted-foreground">{e.classLabel}</p>
-                            <p className="text-[10px] text-muted-foreground">{e.staffName}</p>
-                            {e.roomName && <p className="text-[10px] text-muted-foreground/80">{e.roomName}</p>}
-                          </div>
+            rowList.map(([rowKey, row]) => (
+              <div key={rowKey} className="mb-6 last:mb-0">
+                <p className="mb-2 text-sm font-semibold">
+                  {teacherView ? "Teacher: " : ""}{row.label}
+                </p>
+                <table className="w-full min-w-[720px] border-separate border-spacing-1">
+                  <thead>
+                    <tr>
+                      <th className="w-28 text-left text-xs font-medium text-muted-foreground">Period</th>
+                      {DAYS.map((d) => (
+                        <th key={d.key} className="text-xs font-medium text-muted-foreground">{d.label}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {periods.map((p) => (
+                      <tr key={p._id}>
+                        <td className={cn(
+                          "rounded-md border px-2 py-1.5 text-xs",
+                          p.periodType === "teaching" ? "bg-muted/40" : "bg-muted/20 text-muted-foreground",
+                        )}>
+                          <span className="font-medium">{p.name}</span>
+                          <span className="block text-[10px] text-muted-foreground">
+                            {p.startTime}–{p.endTime}
+                          </span>
                         </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                        {DAYS.map((d) => {
+                          const e = row.cells.get(`${d.key}:${p._id}`);
+                          if (!e) {
+                            return (
+                              <td key={d.key} className="rounded-md border border-dashed bg-transparent p-1 text-center text-[10px] text-muted-foreground/50">
+                                {p.periodType === "teaching" ? "—" : ""}
+                              </td>
+                            );
+                          }
+                          return (
+                            <td key={d.key} className="p-0">
+                              <div className={cn(
+                                "h-full rounded-md border px-2 py-1.5 text-xs",
+                                e.status === "draft" ? "border-dashed bg-amber-50 dark:bg-amber-950/30" : "bg-card",
+                              )}>
+                                <p className="font-medium leading-tight">{e.subjectName}</p>
+                                {!teacherView && <p className="text-[10px] text-muted-foreground">{e.staffName}</p>}
+                                {teacherView && <p className="text-[10px] text-muted-foreground">{e.classLabel}</p>}
+                                {e.roomName && <p className="text-[10px] text-muted-foreground/80">{e.roomName}</p>}
+                              </div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))
           )}
         </CardContent>
       </Card>
