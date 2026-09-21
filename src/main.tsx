@@ -30,6 +30,16 @@ const Users = lazy(() => import("./pages/Users.tsx"));
 const Roles = lazy(() => import("./pages/Roles.tsx"));
 const AuditLogs = lazy(() => import("./pages/AuditLogs.tsx"));
 const Settings = lazy(() => import("./pages/Settings.tsx"));
+const Attendance = lazy(() => import("./pages/ops/Attendance.tsx"));
+const Timetable = lazy(() => import("./pages/ops/Timetable.tsx"));
+const Assignments = lazy(() => import("./pages/ops/Assignments.tsx"));
+const Assessments = lazy(() => import("./pages/ops/Assessments.tsx"));
+const Grading = lazy(() => import("./pages/ops/Grading.tsx"));
+const Results = lazy(() => import("./pages/ops/Results.tsx"));
+const ReportCards = lazy(() => import("./pages/ops/ReportCards.tsx"));
+const ReportCardView = lazy(() => import("./pages/ops/ReportCardView.tsx"));
+const Analytics = lazy(() => import("./pages/ops/Analytics.tsx"));
+const AcademicSettings = lazy(() => import("./pages/ops/AcademicSettings.tsx"));
 const PlatformDashboard = lazy(() => import("./pages/platform/PlatformDashboard.tsx"));
 const PlatformSchools = lazy(() => import("./pages/platform/Schools.tsx"));
 const PlatformUsers = lazy(() => import("./pages/platform/PlatformUsers.tsx"));
@@ -168,6 +178,16 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="/roles" element={<Roles />} />
                 <Route path="/audit" element={<AuditLogs />} />
                 <Route path="/settings" element={<Settings />} />
+                <Route path="/settings/academic" element={<AcademicSettings />} />
+                <Route path="/attendance" element={<Attendance />} />
+                <Route path="/timetable" element={<Timetable />} />
+                <Route path="/assignments" element={<Assignments />} />
+                <Route path="/assessments" element={<Assessments />} />
+                <Route path="/grading" element={<Grading />} />
+                <Route path="/results" element={<Results />} />
+                <Route path="/report-cards" element={<ReportCards />} />
+                <Route path="/report-cards/:reportCardId" element={<ReportCardView />} />
+                <Route path="/analytics" element={<Analytics />} />
               </Route>
 
               {/* Platform super-admin area */}

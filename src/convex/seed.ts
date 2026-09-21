@@ -86,6 +86,8 @@ export const seedAll = action({
           });
         }
       }
+      // Fill any Phase 2 academic-operations gaps (idempotent).
+      await ctx.runMutation(internal.seedHelpers.seedAcademicOps, {});
       return { skipped: true as const, message: "Seed data already present. Bootstrap admin + demo accounts ensured." };
     }
     const superAdminId = await ctx.runQuery(internal.seedHelpers.findUserByEmail, {
@@ -422,6 +424,9 @@ export const seedAll = action({
         { action: "teacher_allocation.created", entityType: "teacherAllocations", entityId: undefined, description: "Seeded demo allocations", schoolId: greenfieldId },
       ],
     });
+
+    // Phase 2 academic operations config + demo data (idempotent).
+    await ctx.runMutation(internal.seedHelpers.seedAcademicOps, {});
 
     return {
       skipped: false as const,

@@ -30,10 +30,15 @@ function label(permission: string): string {
     students: "Students", guardians: "Guardians", staff: "Staff", academics: "Academics",
     subjects: "Subjects", teacher_allocations: "Teacher allocations",
     audit_logs: "Audit logs", settings: "Settings", platform: "Platform",
+    attendance: "Attendance", timetable: "Timetable", assignments: "Assignments",
+    assessments: "Assessments", marks: "Marks", grading: "Grading",
+    results: "Results", report_cards: "Report cards", academic_analytics: "Analytics",
   };
   const actions: Record<string, string> = {
     view: "view", create: "create", update: "update", disable: "enable/disable",
-    manage: "manage", archive: "archive",
+    manage: "manage", archive: "archive", take: "take", edit: "edit",
+    publish: "publish", enter: "enter", submit: "submit", approve: "approve",
+    generate: "generate", review: "review",
   };
   return `${domains[domain] ?? domain} · ${actions[action] ?? action}`;
 }

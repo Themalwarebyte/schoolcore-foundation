@@ -14,6 +14,8 @@ import {
   LayoutDashboard, Users, UserRound, GraduationCap, CalendarRange, CalendarDays,
   Layers, Grid3X3, BookOpen, UserCog, KeyRound, ScrollText, Settings, School,
   ChevronLeft, LogOut, Loader2, ShieldAlert, ClipboardList,
+  CalendarCheck, Clock, FileEdit, ClipboardCheck, SlidersHorizontal, Award,
+  FileSpreadsheet, TrendingUp, Bell,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuthActions } from "@convex-dev/auth/react";
@@ -57,6 +59,19 @@ const NAV: NavGroup[] = [
     ],
   },
   {
+    heading: "Operations",
+    items: [
+      { to: "/attendance", label: "Attendance", icon: CalendarCheck, permission: "attendance.view" },
+      { to: "/timetable", label: "Timetable", icon: Clock, permission: "timetable.view" },
+      { to: "/assignments", label: "Assignments", icon: FileEdit, permission: "assignments.view" },
+      { to: "/assessments", label: "Assessments & Marks", icon: ClipboardCheck, permission: "assessments.view" },
+      { to: "/grading", label: "Grading", icon: SlidersHorizontal, permission: "grading.view" },
+      { to: "/results", label: "Results", icon: Award, permission: "results.view" },
+      { to: "/report-cards", label: "Report Cards", icon: FileSpreadsheet, permission: "report_cards.view" },
+      { to: "/analytics", label: "Analytics", icon: TrendingUp, permission: "academic_analytics.view" },
+    ],
+  },
+  {
     heading: "Administration",
     items: [
       { to: "/users", label: "Users", icon: UserCog, permission: "users.view" },
@@ -68,6 +83,7 @@ const NAV: NavGroup[] = [
     heading: "Settings",
     items: [
       { to: "/settings", label: "School Profile", icon: Settings, permission: "settings.view" },
+      { to: "/settings/academic", label: "Academic Settings", icon: Bell, permission: "settings.view" },
     ],
   },
 ];
