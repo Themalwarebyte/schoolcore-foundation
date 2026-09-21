@@ -1,5 +1,5 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { mutation, query, internalMutation } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { requirePermission, getSchoolRecord } from "./session";
 import { recordAudit } from "./audit";
@@ -30,6 +30,37 @@ export const getSettings = query({
       .withIndex("by_school", (q) => q.eq("schoolId", schoolId))
       .first();
     return { ...DEFAULT_SETTINGS, ...(s ?? {}), schoolId, reportCardSignatureLabels: s?.reportCardSignatureLabels ?? "Class Teacher | Principal", reportCardFooterText: s?.reportCardFooterText ?? "", nextTermOpeningDate: s?.nextTermOpeningDate ?? null };
+  },
+});
+
+/** Internal: lazily provision settings row so policy checks never see undefined mode. */
+export const ensureSettingsInternal = internalMutation({
+  args: { attendanceMode: v.string() },
+  handler: async (ctx, { attendanceMode }) => {
+    const schools = await ctx.db.query("schools").collect();
+    for (const school of schools) {
+      const existing = await ctx.db
+        .query("schoolSettings")
+        .withIndex("by_school", (q) => q.eq("schoolId", school._id))
+        .first();
+      if (!existing) {
+        await ctx.db.insert("schoolSettings", {
+          schoolId: school._id,
+          attendanceMode,
+          schoolDays: ["mon", "tue", "wed", "thu", "fri"],
+          editableWindowDays: 7,
+          rankingEnabled: true,
+          reportCardShowAttendance: true,
+          reportCardShowSubjectComments: true,
+          reportCardShowRank: true,
+          reportCardSignatureLabels: "Class Teacher | Principal",
+        });
+      } else if (existing.attendanceMode === "daily" && attendanceMode === "both") {
+        // Self-heal demo schools so both daily and lesson attendance are exercised.
+        await ctx.db.patch(existing._id, { attendanceMode: "both", updatedAt: Date.now() });
+      }
+    }
+    return null;
   },
 });
 

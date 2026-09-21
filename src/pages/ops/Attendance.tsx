@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
+import { Clock } from "lucide-react";
 import { ClassSelect, ScopeBar } from "@/components/ops/Controls";
 import { cn } from "@/lib/utils";
 import { CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck } from "lucide-react";
@@ -45,13 +46,17 @@ export default function Attendance() {
   const { can } = usePermissions();
   const [classSectionId, setClassSectionId] = useState("");
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [mode, setMode] = useState<"today" | "history">("today");
+  const [mode, setMode] = useState<"today" | "lesson" | "history">("today");
+  // Attendance mode from settings decides whether the lesson tab is usable.
+  const settings = useQuery(api.academicOps.getSettings, can("settings.view") ? {} : "skip");
+  const lessonAllowed =
+    !settings || settings.attendanceMode === "lesson" || settings.attendanceMode === "both";
 
   return (
     <div className="page-shell">
       <PageHeader
         title="Attendance"
-        description="Take the daily register, review history and monitor attendance rates."
+        description="Take the daily or per-lesson register, review history and monitor attendance rates."
       />
 
       <div className="mb-4 flex gap-2">
@@ -62,6 +67,15 @@ export default function Attendance() {
         >
           <ClipboardCheck className="size-4" /> Daily register
         </Button>
+        {lessonAllowed && (
+          <Button
+            variant={mode === "lesson" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setMode("lesson")}
+          >
+            <Clock className="size-4" /> Lesson register
+          </Button>
+        )}
         <Button
           variant={mode === "history" ? "default" : "outline"}
           size="sm"
@@ -79,10 +93,196 @@ export default function Attendance() {
           setDate={setDate}
           canTake={can("attendance.take")}
         />
+      ) : mode === "lesson" ? (
+        <LessonRegisterView date={date} setDate={setDate} canTake={can("attendance.take")} />
       ) : (
         <HistoryView classSectionId={classSectionId} setClassSectionId={setClassSectionId} />
       )}
     </div>
+  );
+}
+
+/* -------------------------------------------------------------------- */
+/* Lesson register (per timetable lesson, same session engine)           */
+/* -------------------------------------------------------------------- */
+
+function LessonRegisterView({
+  date, setDate, canTake,
+}: {
+  date: string; setDate: (v: string) => void; canTake: boolean;
+}) {
+  // Teachers see only their own lessons (server-side scoping in listEntries).
+  const entries = useQuery(api.timetable.listEntries, { includeDrafts: false });
+  const lessons = (entries ?? []).filter(
+    (e) => e.periodType === "teaching" && e.dayOfWeek === DOW_FOR_TODAY(date),
+  );
+  const [selected, setSelected] = useState<string | null>(null);
+  const active = lessons.find((e) => e._id === selected) ?? null;
+
+  return (
+    <>
+      <ScopeBar>
+        <div>
+          <Label className="text-xs text-muted-foreground">Date</Label>
+          <Input
+            type="date"
+            value={date}
+            max={new Date().toISOString().slice(0, 10)}
+            onChange={(e) => setDate(e.target.value)}
+            className="mt-1 bg-background"
+          />
+        </div>
+      </ScopeBar>
+
+      {entries === undefined ? (
+        <div className="h-40 animate-pulse rounded-lg bg-muted" />
+      ) : lessons.length === 0 ? (
+        <p className="py-10 text-center text-sm text-muted-foreground">
+          No timetable lessons scheduled for {date}.
+        </p>
+      ) : (
+        <div className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {lessons.map((e) => (
+            <button
+              key={e._id}
+              type="button"
+              onClick={() => setSelected(e._id)}
+              className={cn(
+                "rounded-lg border p-3 text-left transition-colors hover:bg-muted/40",
+                selected === e._id && "border-primary bg-primary/5",
+              )}
+            >
+              <p className="text-sm font-semibold">{e.classLabel} · {e.subjectName}</p>
+              <p className="text-xs text-muted-foreground">
+                {e.periodName} · {e.startTime}–{e.endTime} · {e.staffName}
+              </p>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {active && (
+        <LessonRegisterForEntry
+          entry={active}
+          date={date}
+          canTake={canTake}
+        />
+      )}
+    </>
+  );
+}
+
+function DOW_FOR_TODAY(date: string): string {
+  const names = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+  return names[new Date(date + "T00:00:00Z").getUTCDay()] ?? "mon";
+}
+
+function LessonRegisterForEntry({
+  entry, date, canTake,
+}: {
+  entry: { _id: string; classSectionId: string; subjectId: string; classLabel: string; subjectName: string; periodName: string; startTime: string };
+  date: string; canTake: boolean;
+}) {
+  const ctx = useQuery(
+    api.attendance.register,
+    { classSectionId: entry.classSectionId as never, date, sessionType: "lesson", subjectId: entry.subjectId as never },
+  );
+  const save = useMutation(api.attendance.saveSession);
+  const [marks, setMarks] = useState<Record<string, AttStatus>>({});
+  const [seededFor, setSeededFor] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const rows: RegisterRow[] = ctx?.students ?? [];
+  if (ctx && seededFor !== `${entry._id}:${date}`) {
+    const next: Record<string, AttStatus> = {};
+    for (const s of ctx.students) next[s.studentId] = "present";
+    for (const r of ctx.records) {
+      if (STATUSES.includes(r.status as AttStatus)) next[r.studentId] = r.status as AttStatus;
+    }
+    setMarks(next);
+    setSeededFor(`${entry._id}:${date}`);
+  }
+
+  const onSave = async (complete: boolean) => {
+    setSaving(true);
+    try {
+      await save({
+        sessionId: (ctx?.sessionId ?? undefined) as never,
+        date,
+        sessionType: "lesson",
+        classSectionId: entry.classSectionId as never,
+        subjectId: entry.subjectId as never,
+        status: complete ? "completed" : "open",
+        records: rows
+          .filter((r) => marks[r.studentId])
+          .map((r) => ({
+            studentId: r.studentId as never,
+            enrollmentId: r.enrollmentId as never,
+            status: marks[r.studentId],
+          })),
+      });
+      toast.success(complete ? "Lesson attendance completed" : "Lesson attendance saved (open)");
+      setSeededFor(null);
+    } catch (err) {
+      toast.error("Unable to save lesson attendance.", {
+        description: err instanceof Error ? err.message : undefined,
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card className="card-soft">
+      <CardHeader className="flex-row items-center justify-between space-y-0">
+        <CardTitle className="text-base">
+          {entry.classLabel} · {entry.subjectName} — {entry.periodName}
+          {ctx?.sessionId ? <span className="ml-2"><StatusBadge status={ctx.status} /></span> : null}
+        </CardTitle>
+        {canTake && (
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" disabled={saving} onClick={() => onSave(false)}>Save draft</Button>
+            <Button size="sm" disabled={saving} onClick={() => onSave(true)}>Complete</Button>
+          </div>
+        )}
+      </CardHeader>
+      <CardContent>
+        {ctx === undefined ? (
+          <div className="h-40 animate-pulse rounded-lg bg-muted" />
+        ) : rows.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">No students enrolled on this date.</p>
+        ) : (
+          <div className="divide-y rounded-lg border">
+            {rows.map((r) => (
+              <div key={r.studentId} className="flex flex-wrap items-center gap-2 px-3 py-2">
+                <div className="min-w-40 flex-1">
+                  <p className="text-sm font-medium">{r.fullName}</p>
+                  <p className="text-xs text-muted-foreground">{r.admissionNumber}</p>
+                </div>
+                <div className="flex gap-1">
+                  {STATUSES.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      disabled={!canTake}
+                      onClick={() => setMarks((m) => ({ ...m, [r.studentId]: s }))}
+                      className={cn(
+                        "rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors disabled:opacity-50",
+                        marks[r.studentId] === s
+                          ? STATUS_STYLES[s]
+                          : "bg-muted/60 text-muted-foreground hover:bg-muted",
+                      )}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

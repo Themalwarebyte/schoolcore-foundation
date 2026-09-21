@@ -3,6 +3,7 @@ import { mutation, query, type MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { requirePermission, getSchoolRecord } from "./session";
 import { recordAudit } from "./audit";
+import { roleHasPermission, type Permission } from "./schema";
 import { ASSESSMENT_STATUSES, MARK_STATUSES } from "./schema";
 import { validDate } from "./attendance";
 
@@ -261,6 +262,8 @@ export const setStatus = mutation({
     if (rule.permission === "results.publish" && !hasPerm(session, "results.publish")) {
       throw new ConvexError("Only a principal or administrator can publish results.");
     }
+    // Teachers may drive their own assessments through the marking lifecycle,
+    // but never approve/publish — those gates are checked above by real perms.
     if (status === "reopened" && !reopenReason?.trim()) {
       throw new ConvexError("A reason is required when reopening results.");
     }
@@ -281,9 +284,10 @@ export const setStatus = mutation({
 
 function hasPerm(
   session: Awaited<ReturnType<typeof import("./session").requirePermission>>,
-  perm: string,
+  perm: Permission,
 ): boolean {
-  return session.role.kind === "platform" || session.role.role !== "teacher";
+  if (session.role.kind === "platform") return true;
+  return roleHasPermission(session.role.role, perm);
 }
 
 export const list = query({
