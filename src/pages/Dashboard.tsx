@@ -4,14 +4,17 @@ import { PageHeader, Can } from "@/components/layouts/school-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/lib/status";
+import { usePermissions } from "@/hooks/use-session";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as ReTooltip,
   PieChart, Pie, Cell,
 } from "recharts";
 import {
   GraduationCap, UserRound, Users, Grid3X3, CalendarRange, BookOpen, ArrowRight,
+  CalendarCheck, ClipboardCheck, Award, Clock,
 } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { Link, useNavigate } from "react-router";
 
 const CHART_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
@@ -19,7 +22,15 @@ const CHART_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var
 export default function Dashboard() {
   const overview = useQuery(api.dashboard.overview);
   const activity = useQuery(api.auditLogs.recent, { limit: 8 });
+  const { can } = usePermissions();
   const navigate = useNavigate();
+
+  // Phase 2: teacher home (replaces the admin dashboard for teachers).
+  const showTeacherHome = can("attendance.take") && !can("users.view");
+  const teacherHome = useQuery(
+    api.academicOps.teacherHome,
+    showTeacherHome ? {} : "skip",
+  );
 
   const cards = [
     { label: "Total Students", value: overview?.counts.students, icon: GraduationCap, to: "/students" },
@@ -30,6 +41,15 @@ export default function Dashboard() {
     { label: "Subjects", value: overview?.counts.subjects, icon: BookOpen, to: "/academics/subjects" },
   ];
 
+  if (showTeacherHome) {
+    return <TeacherHome data={teacherHome} fallback={<FallbackDashboard />} />;
+  }
+
+  return <FallbackDashboard />;
+
+  /* ---------------------------------------------------------------- */
+
+  function FallbackDashboard() {
   return (
     <div className="page-shell">
       <PageHeader
@@ -224,5 +244,193 @@ export default function Dashboard() {
         </p>
       </div>
     </div>
+  );
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* Phase 2: Teacher home (§59)                                             */
+/* ---------------------------------------------------------------------- */
+
+type TeacherHomeData = {
+  isTeacher: boolean;
+  staffName: string;
+  today: string;
+  todaysClasses: {
+    _id: string;
+    classSectionId: string;
+    subjectId: string;
+    periodName: string;
+    startTime: string;
+    classLabel: string;
+    subjectName: string;
+    attendanceDone: boolean;
+  }[];
+  allocations: number;
+  assignments: { _id: string; title: string; dueDate: string; status: string }[];
+  assessments: { _id: string; title: string; status: string; subjectName: string; classLabel: string; entered: number; expected: number }[];
+  actionRequired: { attendance: number; marksIncomplete: number };
+};
+
+function TeacherHome({
+  data, fallback,
+}: { data: TeacherHomeData | null | undefined; fallback: React.ReactNode }) {
+  if (data === undefined) {
+    return (
+      <div className="page-shell">
+        <Skeleton className="h-32 w-full" />
+        <Skeleton className="mt-4 h-64 w-full" />
+      </div>
+    );
+  }
+  // Non-teaching staff fall back to the standard dashboard.
+  if (!data) return fallback;
+
+  return (
+    <div className="page-shell">
+      <PageHeader
+        title={`Good day, ${data.staffName.split(" ")[0]}`}
+        description={`${data.today} · ${data.allocations} active allocation(s)`}
+        actions={
+          <Link to="/attendance" className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+            <CalendarCheck className="size-4" /> Take attendance
+          </Link>
+        }
+      />
+
+      {data.actionRequired.attendance > 0 || data.actionRequired.marksIncomplete > 0 ? (
+        <div className="mb-4 grid grid-cols-2 gap-3">
+          <ActionTile
+            icon={CalendarCheck}
+            tone="amber"
+            label="Attendance to complete today"
+            value={data.actionRequired.attendance}
+            to="/attendance"
+          />
+          <ActionTile
+            icon={ClipboardCheck}
+            tone="red"
+            label="Assessments awaiting marks"
+            value={data.actionRequired.marksIncomplete}
+            to="/assessments"
+          />
+        </div>
+      ) : (
+        <Card className="card-soft mb-4 border-emerald-200 dark:border-emerald-900">
+          <CardContent className="flex items-center gap-3 py-4">
+            <Award className="size-5 text-emerald-600" />
+            <p className="text-sm">You&apos;re all caught up — attendance recorded and marks up to date.</p>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card className="card-soft">
+        <CardHeader>
+          <CardTitle className="text-base">Today&apos;s lessons</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {data.todaysClasses.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              No lessons scheduled for you today.
+            </p>
+          ) : (
+            <div className="divide-y">
+              {data.todaysClasses.map((e) => (
+                <div key={e._id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
+                  <div className="flex items-center gap-3">
+                    <Clock className="size-4 text-muted-foreground" />
+                    <div>
+                      <p className="text-sm font-medium">
+                        {e.classLabel} · {e.subjectName}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {e.periodName} at {e.startTime}
+                      </p>
+                    </div>
+                  </div>
+                  {e.attendanceDone ? (
+                    <StatusBadge status="completed" />
+                  ) : (
+                    <Button asChild size="sm" variant="outline">
+                      <Link to="/attendance">Record</Link>
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <Card className="card-soft">
+          <CardHeader>
+            <CardTitle className="text-base">Assignments due soon</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {data.assignments.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">No active assignments.</p>
+            ) : (
+              <div className="divide-y">
+                {data.assignments.map((a) => (
+                  <div key={a._id} className="flex items-center justify-between py-2 text-sm">
+                    <span className="font-medium">{a.title}</span>
+                    <span className="text-xs text-muted-foreground">due {a.dueDate}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="card-soft">
+          <CardHeader>
+            <CardTitle className="text-base">Marks needing entry</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {data.assessments.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">All marks are up to date.</p>
+            ) : (
+              <div className="divide-y">
+                {data.assessments.map((a) => (
+                  <div key={a._id} className="flex items-center justify-between py-2 text-sm">
+                    <div>
+                      <p className="font-medium">{a.title}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {a.classLabel} · {a.subjectName}
+                      </p>
+                    </div>
+                    <span className="text-xs tabular-nums text-muted-foreground">
+                      {a.entered}/{a.expected}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function ActionTile({
+  icon: Icon, label, value, to, tone,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string; value: number; to: string; tone: "amber" | "red";
+}) {
+  return (
+    <Link
+      to={to}
+      className="flex items-center gap-3 rounded-xl border p-4 transition-colors hover:bg-muted/50"
+    >
+      <Icon className={tone === "red" ? "size-5 text-red-500" : "size-5 text-amber-500"} />
+      <div>
+        <p className="text-lg font-semibold tabular-nums">{value}</p>
+        <p className="text-xs text-muted-foreground">{label}</p>
+      </div>
+      <ArrowRight className="ml-auto size-4 text-muted-foreground" />
+    </Link>
   );
 }

@@ -1,12 +1,77 @@
 import { internalQuery, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
+import type { Id, Doc } from "./_generated/dataModel";
 
 export const countSchools = internalQuery({
   args: {},
   handler: async (ctx) => {
     const schools = await ctx.db.query("schools").collect();
     return schools.length;
+  },
+});
+
+/** Verification query for the Phase 2 academic-ops seed. */
+export const academicOpsStats = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const tables = [
+      "timetablePeriods", "rooms", "timetableEntries", "attendanceSessions",
+      "attendanceRecords", "assessmentTypes", "assessments", "assessmentScores",
+      "gradingSchemes", "gradeBands", "subjectResults", "assignments",
+      "assignmentRecipients", "schoolSettings",
+    ] as const;
+    const counts: Record<string, number> = {};
+    for (const t of tables) {
+      counts[t] = (await ctx.db.query(t).collect()).length;
+    }
+    return counts;
+  },
+});
+
+/**
+ * One-shot workflow verification for the Phase 2 demo data (internal, safe):
+ * approves + publishes the seeded Greenfield subject results, then generates
+ * report cards for that class, exercising the real approval/publish engines.
+ */
+export const verifyResultsWorkflow = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const school = (await ctx.db.query("schools").collect()).find((s) => s.code === "GRN-001");
+    if (!school) return { note: "Greenfield not found" };
+    const results = (await ctx.db.query("subjectResults").withIndex("by_school", (q) => q.eq("schoolId", school._id)).collect())
+      .filter((r) => r.status === "submitted");
+    if (results.length === 0) return { note: "No submitted results to verify" };
+    const admin = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", "admin@greenfield.ac.ke"))
+      .first();
+    if (!admin) return { note: "admin user missing" };
+    const now = Date.now();
+    for (const r of results) {
+      await ctx.db.patch(r._id, { status: "approved", approvedById: admin._id, updatedAt: now });
+    }
+    for (const r of results) {
+      await ctx.db.patch(r._id, { status: "published", publishedAt: now, updatedAt: now });
+    }
+    // Lock contributing assessments.
+    const termId = results[0].termId;
+    const classSectionId = results[0].classSectionId;
+    const subjectId = results[0].subjectId;
+    const assessments = await ctx.db
+      .query("assessments")
+      .withIndex("by_class_subject_term", (q) =>
+        q.eq("classSectionId", classSectionId).eq("subjectId", subjectId).eq("termId", termId))
+      .collect();
+    for (const a of assessments) {
+      if (["draft", "open", "marking", "submitted", "approved"].includes(a.status)) {
+        await ctx.db.patch(a._id, { status: "locked", updatedAt: now });
+      }
+    }
+    return {
+      approved: results.length,
+      published: results.length,
+      assessmentsLocked: assessments.length,
+    };
   },
 });
 
@@ -379,6 +444,393 @@ export const seedAudit = internalMutation({
         description: e.description,
         schoolId: e.schoolId,
       });
+    }
+  },
+});
+
+/* ------------------------------------------------------------------ */
+/* Phase 2: academic operations config + demo data (idempotent).        */
+/* Safe to run against an already-seeded production deployment — every   */
+/* step checks for existing rows and only fills genuine gaps.           */
+/* ------------------------------------------------------------------ */
+
+export const seedAcademicOps = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const schools = await ctx.db.query("schools").collect();
+
+    for (const school of schools) {
+      /* 1. Academic settings (attendance mode, report card options) ---- */
+      const settings = await ctx.db
+        .query("schoolSettings")
+        .withIndex("by_school", (q) => q.eq("schoolId", school._id))
+        .first();
+      if (!settings) {
+        await ctx.db.insert("schoolSettings", {
+          schoolId: school._id,
+          attendanceMode: "daily",
+          schoolDays: ["mon", "tue", "wed", "thu", "fri"],
+          editableWindowDays: 7,
+          rankingEnabled: true,
+          reportCardShowAttendance: true,
+          reportCardShowSubjectComments: true,
+          reportCardShowRank: true,
+          reportCardSignatureLabels: "Class Teacher | Principal",
+        });
+      }
+
+      /* 2. Timetable periods ------------------------------------------- */
+      let periodRows = await ctx.db
+        .query("timetablePeriods")
+        .withIndex("by_school", (q) => q.eq("schoolId", school._id))
+        .collect();
+      if (periodRows.filter((p) => p.status === "active").length === 0) {
+        const periodDefs: [string, string, string, string][] = [
+          ["Assembly", "07:30", "07:50", "assembly"],
+          ["Period 1", "07:50", "08:30", "teaching"],
+          ["Period 2", "08:30", "09:10", "teaching"],
+          ["Break", "09:10", "09:30", "break"],
+          ["Period 3", "09:30", "10:10", "teaching"],
+          ["Period 4", "10:10", "10:50", "teaching"],
+          ["Lunch", "10:50", "11:30", "lunch"],
+          ["Period 5", "11:30", "12:10", "teaching"],
+          ["Period 6", "12:10", "12:50", "teaching"],
+        ];
+        for (let i = 0; i < periodDefs.length; i++) {
+          const [name, start, end, type] = periodDefs[i];
+          await ctx.db.insert("timetablePeriods", {
+            schoolId: school._id,
+            name,
+            startTime: start,
+            endTime: end,
+            periodType: type,
+            displayOrder: i + 1,
+            status: "active",
+          });
+        }
+        periodRows = await ctx.db
+          .query("timetablePeriods")
+          .withIndex("by_school", (q) => q.eq("schoolId", school._id))
+          .collect();
+      }
+      const teachingPeriods = periodRows
+        .filter((p) => p.status === "active" && p.periodType === "teaching")
+        .sort((a, b) => a.displayOrder - b.displayOrder);
+
+      /* 3. Rooms -------------------------------------------------------- */
+      const roomRows = await ctx.db
+        .query("rooms")
+        .withIndex("by_school", (q) => q.eq("schoolId", school._id))
+        .collect();
+      if (roomRows.length === 0) {
+        for (const r of [
+          { name: "Classroom A", code: "CR-A", capacity: 45, roomType: "classroom" },
+          { name: "Classroom B", code: "CR-B", capacity: 45, roomType: "classroom" },
+          { name: "Science Lab", code: "LAB-1", capacity: 30, roomType: "laboratory" },
+        ]) {
+          await ctx.db.insert("rooms", { schoolId: school._id, ...r, status: "active" });
+        }
+      }
+
+      /* 4. Assessment types --------------------------------------------- */
+      const typeRows = await ctx.db
+        .query("assessmentTypes")
+        .withIndex("by_school", (q) => q.eq("schoolId", school._id))
+        .collect();
+      if (typeRows.length === 0) {
+        for (const t of [
+          { name: "Opener Exam", shortName: "OPEN", defaultWeight: 40 },
+          { name: "Midterm Exam", shortName: "MID", defaultWeight: 30 },
+          { name: "Endterm Exam", shortName: "END", defaultWeight: 30 },
+          { name: "Class Test", shortName: "TEST", defaultWeight: 20 },
+          { name: "Project", shortName: "PRJ", defaultWeight: 10 },
+        ]) {
+          await ctx.db.insert("assessmentTypes", { schoolId: school._id, ...t, status: "active" });
+        }
+      }
+      const assessmentTypes = await ctx.db
+        .query("assessmentTypes")
+        .withIndex("by_school", (q) => q.eq("schoolId", school._id))
+        .collect();
+
+      /* 5. Grading scheme + bands --------------------------------------- */
+      const schemeRows = await ctx.db
+        .query("gradingSchemes")
+        .withIndex("by_school", (q) => q.eq("schoolId", school._id))
+        .collect();
+      if (schemeRows.length === 0) {
+        const schemeId = await ctx.db.insert("gradingSchemes", {
+          schoolId: school._id,
+          name: "CBC Performance Bands",
+          description: "Default competency-based grading bands",
+          status: "active",
+        });
+        const bands: [string, number, number, boolean, string][] = [
+          ["Exceeding Expectations", 90, 100, true, "Consistently above grade level"],
+          ["Meeting Expectations", 75, 89, true, "At grade level"],
+          ["Approaching Expectations", 58, 74, true, "Slightly below grade level"],
+          ["Below Expectations", 40, 57, false, "Needs targeted support"],
+          ["Intervention Required", 0, 39, false, "Intensive support needed"],
+        ];
+        for (let i = 0; i < bands.length; i++) {
+          const [label, minPercent, maxPercent, isPass, descriptor] = bands[i];
+          await ctx.db.insert("gradeBands", {
+            schoolId: school._id,
+            schemeId,
+            label,
+            minPercent,
+            maxPercent,
+            descriptor,
+            isPass,
+            displayOrder: i + 1,
+          });
+        }
+      }
+
+      /* Shared inputs for timetable + demo records ---------------------- */
+      const year = await ctx.db
+        .query("academicYears")
+        .withIndex("by_school_current", (q) => q.eq("schoolId", school._id).eq("isCurrent", true))
+        .first();
+      const allocations = year
+        ? (await ctx.db.query("teacherAllocations").withIndex("by_school", (q) => q.eq("schoolId", school._id)).collect())
+            .filter((a) => a.status === "active" && a.academicYearId === year._id)
+        : [];
+
+      /* 6. Timetable entries (conflict-free greedy layout) --------------- */
+      if (year && teachingPeriods.length > 0 && allocations.length > 0) {
+        const existingEntries = await ctx.db
+          .query("timetableEntries")
+          .withIndex("by_school_year", (q) => q.eq("schoolId", school._id).eq("academicYearId", year._id))
+          .collect();
+        if (existingEntries.length === 0) {
+          const sections = (
+            await ctx.db.query("classSections").withIndex("by_school", (q) => q.eq("schoolId", school._id)).collect()
+          ).filter((s) => s.status === "active" && s.academicYearId === year._id);
+          const days = ["mon", "tue", "wed", "thu", "fri"];
+          const busyTeacher = new Set<string>(); // staffId:day:periodId
+          const busySlot = new Set<string>(); // classSectionId:day:periodId
+          for (const section of sections) {
+            for (const day of days) {
+              for (const period of teachingPeriods) {
+                const slotKey = `${section._id}:${day}:${period._id}`;
+                if (busySlot.has(slotKey)) continue;
+                const candidate: Doc<"teacherAllocations"> | undefined = allocations.find(
+                  (a: Doc<"teacherAllocations">) =>
+                    a.classSectionId === section._id &&
+                    !busyTeacher.has(`${a.staffId}:${day}:${period._id}`),
+                );
+                if (!candidate) continue;
+                busySlot.add(slotKey);
+                busyTeacher.add(`${candidate.staffId}:${day}:${period._id}`);
+                await ctx.db.insert("timetableEntries", {
+                  schoolId: school._id,
+                  academicYearId: year._id,
+                  termId: undefined,
+                  dayOfWeek: day,
+                  periodId: period._id,
+                  classSectionId: section._id,
+                  subjectId: candidate.subjectId,
+                  teacherAllocationId: candidate._id,
+                  staffId: candidate.staffId,
+                  roomId: undefined,
+                  status: "published",
+                  updatedAt: Date.now(),
+                });
+              }
+            }
+          }
+        }
+      }
+
+      /* 7. Demo assessments, marks, attendance, assignment, results ------
+       * Only for the Greenfield demo school and only when it has no        */
+      /* assessments yet — real schools keep whatever they created.        */
+      if (school.code === "GRN-001" && year) {
+        const anyAssessments = await ctx.db
+          .query("assessments")
+          .withIndex("by_school", (q) => q.eq("schoolId", school._id))
+          .collect();
+        if (anyAssessments.length === 0) {
+          const terms = await ctx.db
+            .query("terms")
+            .withIndex("by_academic_year", (q) => q.eq("academicYearId", year._id))
+            .collect();
+          const term1 = terms.sort((a, b) => a.displayOrder - b.displayOrder)[0];
+          if (term1) {
+            const sections = (
+              await ctx.db.query("classSections").withIndex("by_school", (q) => q.eq("schoolId", school._id)).collect()
+            ).filter((s) => s.status === "active" && s.academicYearId === year._id);
+            const section = sections[2] ?? sections[0]; // Grade 7 Blue when seeded
+            const subject = (
+              await ctx.db.query("subjects").withIndex("by_school", (q) => q.eq("schoolId", school._id)).collect()
+            )
+              .filter((s) => s.status === "active")
+              .find((s) => s.code === "MAT");
+            if (section && subject) {
+              const allocation = allocations.find(
+                (a) => a.classSectionId === section._id && a.subjectId === subject._id,
+              );
+              const staffRow = allocation ? await ctx.db.get(allocation.staffId) : null;
+              const recorder =
+                staffRow?.userId ??
+                (await ctx.db.query("users").withIndex("email", (q) => q.eq("email", "admin@greenfield.ac.ke")).first())?._id;
+              if (recorder) {
+                const typeExam = assessmentTypes.find((t) => t.name === "Opener Exam") ?? assessmentTypes[0];
+                const typeTest = assessmentTypes.find((t) => t.name === "Class Test") ?? assessmentTypes[0];
+
+                const openerId = await ctx.db.insert("assessments", {
+                  schoolId: school._id,
+                  academicYearId: year._id,
+                  termId: term1._id,
+                  classSectionId: section._id,
+                  subjectId: subject._id,
+                  teacherAllocationId: allocation?._id,
+                  staffId: allocation?.staffId,
+                  assessmentTypeId: typeExam._id,
+                  title: "Mathematics Opener Exam",
+                  assessmentDate: "2026-02-10",
+                  maxMarks: 100,
+                  weight: 40,
+                  countsTowardFinal: true,
+                  status: "marking",
+                  createdBy: recorder,
+                });
+                const quizId = await ctx.db.insert("assessments", {
+                  schoolId: school._id,
+                  academicYearId: year._id,
+                  termId: term1._id,
+                  classSectionId: section._id,
+                  subjectId: subject._id,
+                  teacherAllocationId: allocation?._id,
+                  staffId: allocation?.staffId,
+                  assessmentTypeId: typeTest._id,
+                  title: "Fractions Quiz",
+                  assessmentDate: "2026-03-03",
+                  maxMarks: 40,
+                  weight: 60,
+                  countsTowardFinal: true,
+                  status: "marking",
+                  createdBy: recorder,
+                });
+
+                const enrolls = (
+                  await ctx.db.query("enrollments").withIndex("by_class_section", (q) => q.eq("classSectionId", section._id)).collect()
+                ).filter((e) => e.status === "active" && e.academicYearId === year._id);
+
+                for (let idx = 0; idx < enrolls.length; idx++) {
+                  const e = enrolls[idx];
+                  const base = 55 + ((idx * 13) % 40); // 55–94 deterministic
+                  // Opener: one absent student exercises the absent workflow.
+                  await ctx.db.insert("assessmentScores", {
+                    schoolId: school._id,
+                    assessmentId: openerId,
+                    studentId: e.studentId,
+                    enrollmentId: e._id,
+                    status: idx === 3 ? "absent" : "entered",
+                    score: idx === 3 ? undefined : Math.min(base + 3, 100),
+                    recordedById: recorder,
+                    updatedAt: Date.now(),
+                  });
+                  await ctx.db.insert("assessmentScores", {
+                    schoolId: school._id,
+                    assessmentId: quizId,
+                    studentId: e.studentId,
+                    enrollmentId: e._id,
+                    status: "entered",
+                    score: (base % 33) + 3, // 3–35 of 40
+                    recordedById: recorder,
+                    updatedAt: Date.now(),
+                  });
+                }
+
+                // Submitted results for the subject (approve → publish demoable).
+                const bands = await ctx.db.query("gradeBands").withIndex("by_school", (q) => q.eq("schoolId", school._id)).collect();
+                const gradeLabelFor = (pct: number) =>
+                  bands.find((b) => pct >= b.minPercent && pct <= b.maxPercent)?.label;
+                for (let idx = 0; idx < enrolls.length; idx++) {
+                  const e = enrolls[idx];
+                  const base = 55 + ((idx * 13) % 40);
+                  const openerPct = idx === 3 ? 0 : Math.min(base + 3, 100);
+                  const quizPct = (((base % 33) + 3) / 40) * 100;
+                  const pct = Math.round((openerPct * 0.4 + quizPct * 0.6) * 10) / 10;
+                  await ctx.db.insert("subjectResults", {
+                    schoolId: school._id,
+                    academicYearId: year._id,
+                    termId: term1._id,
+                    classSectionId: section._id,
+                    subjectId: subject._id,
+                    studentId: e.studentId,
+                    enrollmentId: e._id,
+                    totalScore: pct,
+                    percentage: pct,
+                    gradeLabel: gradeLabelFor(pct),
+                    status: "submitted",
+                    submittedById: recorder,
+                    updatedAt: Date.now(),
+                  });
+                }
+
+                // A week of completed daily attendance (dates inside Term 1).
+                for (const date of ["2026-02-02", "2026-02-03", "2026-02-04", "2026-02-05", "2026-02-06", "2026-02-09"]) {
+                  const sessionId = await ctx.db.insert("attendanceSessions", {
+                    schoolId: school._id,
+                    academicYearId: year._id,
+                    termId: term1._id,
+                    classSectionId: section._id,
+                    sessionType: "daily",
+                    date,
+                    status: "completed",
+                    recordedById: recorder,
+                    createdAt: Date.now(),
+                  });
+                  for (let idx = 0; idx < enrolls.length; idx++) {
+                    const e = enrolls[idx];
+                    const status = idx % 9 === 4 ? "absent" : idx % 11 === 7 ? "late" : idx === 2 && date === "2026-02-04" ? "excused" : "present";
+                    await ctx.db.insert("attendanceRecords", {
+                      schoolId: school._id,
+                      sessionId,
+                      studentId: e.studentId,
+                      enrollmentId: e._id,
+                      status,
+                      recordedById: recorder,
+                      updatedAt: Date.now(),
+                    });
+                  }
+                }
+
+                // One published assignment for the class.
+                const assignmentId = await ctx.db.insert("assignments", {
+                  schoolId: school._id,
+                  academicYearId: year._id,
+                  termId: term1._id,
+                  classSectionId: section._id,
+                  subjectId: subject._id,
+                  staffId: (allocation?.staffId ?? recorder) as Id<"staff">,
+                  teacherAllocationId: allocation?._id,
+                  title: "Fractions problem set",
+                  instructions: "Complete problems 1–12 from the fractions workbook.",
+                  issueDate: "2026-02-20",
+                  dueDate: "2026-02-27",
+                  maxMarks: 20,
+                  isGraded: true,
+                  status: "published",
+                  createdBy: recorder,
+                  publishedAt: Date.now(),
+                });
+                for (const e of enrolls) {
+                  await ctx.db.insert("assignmentRecipients", {
+                    schoolId: school._id,
+                    assignmentId,
+                    studentId: e.studentId,
+                    enrollmentId: e._id,
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
 });
