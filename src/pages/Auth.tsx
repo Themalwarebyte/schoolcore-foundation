@@ -48,12 +48,12 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   // If sign-in succeeds but the account record is missing or disabled, the
   // session is unusable: show the disabled message and clear the session.
   const me = useQuery(api.accounts.myMemberships);
+  const unusableSession = !convexLoading && isAuthenticated && me === null;
   useEffect(() => {
-    if (!convexLoading && isAuthenticated && me === null) {
-      setError(DISABLED_MESSAGE);
+    if (unusableSession) {
       void signOut();
     }
-  }, [convexLoading, isAuthenticated, me, signOut]);
+  }, [unusableSession, signOut]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -138,12 +138,12 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                   required
                 />
               </div>
-              {error && (
-                <Alert variant="destructive">
-                  <ShieldAlert className="size-4" />
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
-              )}
+      {(error ?? (unusableSession ? DISABLED_MESSAGE : null)) && (
+        <Alert variant="destructive">
+          <ShieldAlert className="size-4" />
+          <AlertDescription>{error ?? DISABLED_MESSAGE}</AlertDescription>
+        </Alert>
+      )}
               <Button type="submit" className="w-full" disabled={isLoading || !email || !password}>
                 {isLoading ? (
                   <>

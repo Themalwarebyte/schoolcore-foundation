@@ -16,6 +16,14 @@ export const emailOtp = Email({
     return generateRandomString(random, alphabet, 6);
   },
   async sendVerificationRequest({ identifier: email, token }) {
+    // The API key must be provided through the deployment environment (Keys
+    // UI / `convex env set`) — never hardcoded in source. SchoolCore's admin
+    // sign-in flow does not use email OTP; this provider is retained from the
+    // platform template.
+    const apiKey = process.env.VLY_EMAIL_OTP_API_KEY;
+    if (!apiKey) {
+      throw new Error("Email OTP is not configured (missing VLY_EMAIL_OTP_API_KEY).");
+    }
     try {
       await axios.post(
         "https://auth.freebuff.app/send_otp",
@@ -26,7 +34,7 @@ export const emailOtp = Email({
         },
         {
           headers: {
-            "x-api-key": "fb_email_2crN1hqIArZP2bEfvjp5Qik4",
+            "x-api-key": apiKey,
           },
         },
       );

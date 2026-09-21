@@ -4,7 +4,7 @@ import { internal } from "./_generated/api";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import type { Id } from "./_generated/dataModel";
 import { recordAudit } from "./audit";
-import { ROLES, type Role } from "./schema";
+import { type Role } from "./schema";
 import { requirePermission } from "./session";
 
 const SCHOOL_ASSIGNABLE: Role[] = [
@@ -23,7 +23,7 @@ export const list = query({
     status: v.optional(v.string()),
     paginationOpts: v.object({ numItems: v.number(), cursor: v.union(v.string(), v.null()) }),
   },
-  handler: async (ctx, { search, role, status, paginationOpts }) => {
+  handler: async (ctx, { search, role, status }) => {
     const session = await requirePermission(ctx, "users.view");
     const members = await ctx.db
       .query("schoolMemberships")
@@ -87,23 +87,31 @@ export const createUser = action({
     if (role === "school_admin" && !["school_admin", "super_admin"].includes(session.role)) {
       throw new ConvexError("Only an administrator can create school administrators.");
     }
-    const { createAccount } = await import("@convex-dev/auth/server");
-    const userRecordId: Id<"users"> = await ctx.runMutation(internal.accounts.ensureUserRecordInternal, {
-      email: normalized,
-      name,
-    });
-    const hasAccount = await ctx.runQuery(internal.accounts.hasPasswordAccount, {
-      email: normalized,
-    });
-    if (!hasAccount) {
+    const { createAccount, retrieveAccount } = await import("@convex-dev/auth/server");
+    // Let createAccount create (or reuse) the user row it links to. Never
+    // pre-create a separate user record: that risks the membership landing on
+    // a different duplicate row than the one sign-in resolves to.
+    const existingAccount = await retrieveAccount(ctx, {
+      provider: "password",
+      account: { id: normalized },
+    }).catch(() => null);
+    if (!existingAccount) {
       await createAccount(ctx, {
         provider: "password",
         account: { id: normalized, secret: password },
-        profile: { email: normalized },
+        profile: { email: normalized, name },
       });
     }
+    const account = existingAccount ?? (await retrieveAccount(ctx, {
+      provider: "password",
+      account: { id: normalized },
+    }));
+    if (!account) {
+      throw new ConvexError("Could not create the user account.");
+    }
+    const memberUserId = account.user._id as Id<"users">;
     await ctx.runMutation(internal.accounts.addMembershipInternal, {
-      userId: userRecordId,
+      userId: memberUserId,
       schoolId: session.schoolId ?? undefined,
       role,
       createdById: session.userId,
@@ -113,10 +121,10 @@ export const createUser = action({
       schoolId: session.schoolId ?? undefined,
       action: "user.created",
       entityType: "users",
-      entityId: userRecordId,
+      entityId: memberUserId,
       description: `Created ${role} account for ${normalized}`,
     });
-    return userRecordId;
+    return memberUserId;
   },
 });
 

@@ -21,6 +21,14 @@ export const findUserByEmail = internalQuery({
   },
 });
 
+export const findSchoolByCode = internalQuery({
+  args: { code: v.string() },
+  handler: async (ctx, { code }) => {
+    const schools = await ctx.db.query("schools").collect();
+    return schools.find((s) => s.code === code)?._id ?? null;
+  },
+});
+
 export const getStudent = internalQuery({
   args: { studentId: v.id("students") },
   handler: async (ctx, { studentId }) => {
@@ -36,6 +44,14 @@ export const getGuardianLinks = internalQuery({
       .withIndex("by_student", (q) => q.eq("studentId", studentId))
       .collect();
     return links.map((l) => ({ guardianId: l.guardianId }));
+  },
+});
+
+/** Link a staff record to a user resolved through their auth account. */
+export const linkStaffUserById = internalMutation({
+  args: { staffId: v.id("staff"), userId: v.id("users") },
+  handler: async (ctx, { staffId, userId }) => {
+    await ctx.db.patch(staffId, { userId });
   },
 });
 
