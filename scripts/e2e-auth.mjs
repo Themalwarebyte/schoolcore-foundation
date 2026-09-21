@@ -203,8 +203,10 @@ if (gfAdmin.jwt) {
 }
 
 console.log("== 6b. Remaining documented demo accounts sign in ==");
+let principalTokens, accountantTokens, teacherTokens, rvAdminTokens;
 {
-  const principal = await signIn("principal@greenfield.ac.ke", "Greenfield#2026");
+  principalTokens = await signIn("principal@greenfield.ac.ke", "Greenfield#2026");
+  const principal = principalTokens;
   check("principal sign-in", !!principal.jwt, principal.error ?? "no tokens");
   if (principal.jwt) {
     const c = new ConvexHttpClient(url);
@@ -220,11 +222,14 @@ console.log("== 6b. Remaining documented demo accounts sign in ==");
       c.close?.();
     }
   }
-  const accountant = await signIn("accounts@greenfield.ac.ke", "Greenfield#2026");
+  accountantTokens = await signIn("accounts@greenfield.ac.ke", "Greenfield#2026");
+  const accountant = accountantTokens;
   check("accountant sign-in", !!accountant.jwt, accountant.error ?? "no tokens");
-  const teacher = await signIn("grace.wanjiku@greenfield.ac.ke", "Greenfield#2026");
+  teacherTokens = await signIn("grace.wanjiku@greenfield.ac.ke", "Greenfield#2026");
+  const teacher = teacherTokens;
   check("teacher sign-in", !!teacher.jwt, teacher.error ?? "no tokens");
-  const rvAdmin = await signIn("admin@riverside.ac.ke", "Riverside#2026");
+  rvAdminTokens = await signIn("admin@riverside.ac.ke", "Riverside#2026");
+  const rvAdmin = rvAdminTokens;
   check("riverside admin sign-in", !!rvAdmin.jwt, rvAdmin.error ?? "no tokens");
   if (rvAdmin.jwt && riversideId) {
     const c = new ConvexHttpClient(url);
@@ -332,6 +337,177 @@ if (createdUserId) {
     }
     const disabled = await signIn(createdEmail, createdPassword);
     check("disabled user's raw auth:signIn fails", !!disabled.error || !disabled.jwt);
+  }
+}
+
+console.log("== 6c. RBAC: restricted roles cannot administer users ==");
+{
+  for (const [label, tokens] of [
+    ["teacher", teacherTokens?.jwt],
+    ["accountant", accountantTokens?.jwt],
+  ]) {
+    if (!tokens) continue;
+    const c = new ConvexHttpClient(url);
+    try {
+      c.setAuth(tokens);
+      let rejected = false;
+      let detail = "";
+      try {
+        await c.action(anyApi.team.createUser, {
+          email: `rbac-probe-${Date.now()}@schoolcore.dev`,
+          name: "RBAC Probe",
+          role: "teacher",
+          password: "Probe#2026x",
+        });
+        detail = "createUser unexpectedly succeeded";
+      } catch (err) {
+        rejected = true;
+        detail = describeErr(err);
+      }
+      check(`${label} cannot create users (users.create denied)`, rejected, detail);
+    } finally {
+      c.close?.();
+    }
+  }
+}
+
+console.log("== 7b. Tenant isolation across every module ==");
+{
+  const c = new ConvexHttpClient(url);
+  try {
+    c.setAuth(gfAdmin.jwt);
+    const guardians = await c.query(anyApi.guardians.list, {
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+    check(
+      "greenfield admin sees only greenfield guardians",
+      (guardians?.page ?? []).length > 0 && (guardians?.page ?? []).every((g) => g.schoolId === greenfieldId),
+    );
+    const staff = await c.query(anyApi.staff.list, {
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+    check(
+      "greenfield admin sees only greenfield staff",
+      (staff?.page ?? []).length > 0 && (staff?.page ?? []).every((s) => s.schoolId === greenfieldId),
+    );
+    const subjects = await c.query(anyApi.academics.listSubjects, {});
+    check(
+      "greenfield admin sees only greenfield subjects",
+      (subjects ?? []).length > 0 && (subjects ?? []).every((s) => s.schoolId === greenfieldId),
+    );
+    // Sections are scoped server-side to the caller's school's academic year
+    // and return enriched rows without schoolId; Riverside's unique "Sun"
+    // stream section must therefore never appear in Greenfield's list.
+    const sections = await c.query(anyApi.academics.listClassSections, {});
+    check(
+      "greenfield admin sees only greenfield class sections (no riverside Sun section)",
+      (sections ?? []).length > 0 && (sections ?? []).every((s) => s.streamName !== "Sun"),
+      JSON.stringify((sections ?? []).map((s) => s.streamName)),
+    );
+    const mySchool = await c.query(anyApi.schools.getMySchool, {});
+    check(
+      "greenfield admin's school context is greenfield (not riverside)",
+      !!mySchool && mySchool._id === greenfieldId && mySchool.code === "GRN-001",
+      mySchool ? `${mySchool.name} (${mySchool.code})` : "null",
+    );
+  } catch (err) {
+    check("tenant isolation across modules", false, describeErr(err));
+  } finally {
+    c.close?.();
+  }
+}
+
+console.log("== 8b. School admin creates a user (controlled provisioning) ==");
+const gfCreatedEmail = `e2e-gf-${Date.now()}@schoolcore.dev`;
+let gfCreatedUserId;
+{
+  try {
+    gfCreatedUserId = await gfClient.action(anyApi.team.createUser, {
+      email: gfCreatedEmail,
+      name: "GF E2E Teacher",
+      role: "teacher",
+      password: "GfTeacher#2026",
+    });
+    check("greenfield admin created a user", !!gfCreatedUserId);
+  } catch (err) {
+    check("greenfield admin created a user", false, describeErr(err));
+  }
+  if (gfCreatedUserId) {
+    const created = await signIn(gfCreatedEmail, "GfTeacher#2026");
+    check("school-admin-created user can sign in", !!created.jwt, created.error ?? "no tokens");
+    if (created.jwt) {
+      const c = new ConvexHttpClient(url);
+      try {
+        c.setAuth(created.jwt);
+        const me = await c.query(anyApi.team.me, {});
+        check(
+          "created user resolves into greenfield school context",
+          !!me && me.email === gfCreatedEmail && (me.memberships ?? []).some((m) => m.schoolId === greenfieldId),
+          me ? JSON.stringify(me.memberships) : "null",
+        );
+        const students = await c.query(anyApi.students.list, {
+          paginationOpts: { numItems: 5, cursor: null },
+        });
+        check(
+          "created user sees greenfield students only",
+          (students?.page ?? []).length > 0 && (students?.page ?? []).every((s) => s.schoolId === greenfieldId),
+        );
+      } finally {
+        c.close?.();
+      }
+    }
+    // Remove the temporary test account (deactivate: user rows are referenced
+    // by memberships/audit logs, so deactivation is the safe removal).
+    try {
+      await gfClient.mutation(anyApi.team.setActive, { userId: gfCreatedUserId, isActive: false });
+      const recheck = await signIn(gfCreatedEmail, "GfTeacher#2026");
+      check("deactivated test user can no longer sign in", !!recheck.error || !recheck.jwt);
+    } catch (err) {
+      check("deactivated test user can no longer sign in", false, describeErr(err));
+    }
+  }
+}
+
+console.log("== 11. Canonical membership map (sign-in → userId → memberships) ==");
+{
+  const expectations = [
+    [SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD, { isSuperAdmin: true }],
+    [GREENFIELD_ADMIN_EMAIL, GREENFIELD_ADMIN_PASSWORD, { schoolId: () => greenfieldId, role: "school_admin" }],
+    ["principal@greenfield.ac.ke", "Greenfield#2026", { schoolId: () => greenfieldId, role: "principal" }],
+    ["accounts@greenfield.ac.ke", "Greenfield#2026", { schoolId: () => greenfieldId, role: "accountant" }],
+    ["grace.wanjiku@greenfield.ac.ke", "Greenfield#2026", { schoolId: () => greenfieldId, role: "teacher" }],
+    ["admin@riverside.ac.ke", "Riverside#2026", { schoolId: () => riversideId, role: "school_admin" }],
+  ];
+  for (const [email, password, want] of expectations) {
+    const tokens = await signIn(email, password);
+    if (!tokens.jwt) {
+      check(`membership map: ${email}`, false, tokens.error ?? "no tokens");
+      continue;
+    }
+    const c = new ConvexHttpClient(url);
+    try {
+      c.setAuth(tokens.jwt);
+      const me = await c.query(anyApi.accounts.myMemberships, {});
+      const expectedSchoolId = typeof want.schoolId === "function" ? want.schoolId() : want.schoolId;
+      // myMemberships only lists ACTIVE memberships (filtered server-side),
+      // so presence of the expected school/role pair proves active status.
+      const ok =
+        !!me &&
+        me.email === email &&
+        (want.isSuperAdmin ? me.isSuperAdmin === true : true) &&
+        (expectedSchoolId
+          ? (me.memberships ?? []).some((m) => m.schoolId === expectedSchoolId && m.role === want.role)
+          : !(me.memberships ?? []).some((m) => m.schoolId !== null));
+      check(
+        `membership map: ${email}`,
+        ok,
+        me ? `userId=${me.userId} memberships=${JSON.stringify(me.memberships)}` : "null",
+      );
+    } catch (err) {
+      check(`membership map: ${email}`, false, describeErr(err));
+    } finally {
+      c.close?.();
+    }
   }
 }
 

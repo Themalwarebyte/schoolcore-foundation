@@ -47,11 +47,24 @@ export const getGuardianLinks = internalQuery({
   },
 });
 
-/** Link a staff record to a user resolved through their auth account. */
-export const linkStaffUserById = internalMutation({
-  args: { staffId: v.id("staff"), userId: v.id("users") },
-  handler: async (ctx, { staffId, userId }) => {
-    await ctx.db.patch(staffId, { userId });
+/**
+ * Self-heal staff→user links: any staff row in the school whose email matches
+ * gets its userId repointed to the canonical authenticated user (the user row
+ * the password authAccount resolves to). Idempotent.
+ */
+export const alignStaffUserLink = internalMutation({
+  args: { schoolId: v.id("schools"), email: v.string(), userId: v.id("users") },
+  handler: async (ctx, { schoolId, email, userId }) => {
+    const staff = await ctx.db
+      .query("staff")
+      .withIndex("by_school", (q) => q.eq("schoolId", schoolId))
+      .collect();
+    const normalized = email.trim().toLowerCase();
+    for (const s of staff) {
+      if ((s.email ?? "").trim().toLowerCase() === normalized && s.userId !== userId) {
+        await ctx.db.patch(s._id, { userId });
+      }
+    }
   },
 });
 
