@@ -103,7 +103,7 @@ the repository**. `.env.example` (if present) must contain placeholders only.
 | `PLATFORM_ADMIN_EMAIL`    | Bootstrap super admin email (default `admin@schoolcore.dev`).   |
 | `PLATFORM_ADMIN_NAME`     | Bootstrap super admin name.                                     |
 | `PLATFORM_ADMIN_PASSWORD` | Bootstrap super admin password (dev default `ChangeMe!2026`).   |
-| `SEED_SECRET`             | Guard for the seed action (dev default `schoolcore-dev-seed`).  |
+| `SEED_SECRET`             | Guard for the seed action. **Required** — the seed refuses to run without it; set a strong random value. |
 
 Do **not** set Convex system variables by hand: `CONVEX_SITE_URL` (the deployment's
 `*.convex.site` HTTP-actions domain) and `CONVEX_DEPLOYMENT_NAME` are provided by
@@ -114,14 +114,59 @@ set a separate custom variable (e.g. `SITE_URL=https://schoolcore.freebuff.app/`
 **Local development only:** a local `.env` (git-ignored) may hold `VITE_CONVEX_URL`
 for a local dev deployment. Never place production secrets in any committed file.
 
+### Canonical `.env.example` content
+
+> Note: the hosting platform blocks writes to `.env*` files from tooling. If the
+> checked-in `.env.example` ever drifts from the content below (e.g. it must
+> never contain `CONVEX_SITE_URL=http://localhost:5173` — that value is a Convex
+> system variable, not the Vite dev URL), replace the file's contents with this:
+
+```bash
+# -----------------------------------------------------------------
+# FRONTEND (Vite) variables — the only values that belong in a
+# frontend .env file. Everything else lives in the Convex deployment
+# environment or is provided automatically by Convex (see README).
+# -----------------------------------------------------------------
+
+# Convex deployment URL the browser talks to. Must be the SAME
+# deployment that hosts the auth tables, backend functions and seed
+# data. Get it from `bunx convex dev` output or the platform preview.
+VITE_CONVEX_URL=
+
+# NOTE: Do NOT put CONVEX_SITE_URL or CONVEX_DEPLOYMENT here.
+# CONVEX_SITE_URL is a Convex-PROVIDED system variable (the
+# deployment's *.convex.site HTTP-actions domain used as the auth/OIDC
+# issuer in convex/auth.config.ts) — it is never the Vite dev-server
+# URL and must never be set to http://localhost:5173.
+# CONVEX_DEPLOYMENT is managed by the Convex CLI, not by you.
+#
+# Server-side values (PLATFORM_ADMIN_EMAIL, PLATFORM_ADMIN_PASSWORD,
+# SEED_SECRET, JWT_PRIVATE_KEY, JWKS, VLY_EMAIL_OTP_API_KEY, SITE_URL)
+# are configured in the Convex deployment environment via the platform
+# secret manager — never in this file and never committed.
+#
+# Local development: copy this file to .env (git-ignored) and fill in
+# VITE_CONVEX_URL with your local dev deployment URL.
+#
+# Deployment used by `npx convex dev` (managed by the CLI):
+CONVEX_DEPLOYMENT=
+```
+
 ### Database setup & migrations
 
 Convex stores its schema in code: `src/convex/schema.ts` **is** the migration.
 A fresh clone reproduces the full database with:
 
 ```bash
-bunx convex dev --once          # push schema + functions (creates tables & indexes)
-bunx convex run seed:seedAll '{"secret":"schoolcore-dev-seed"}'
+# 1) Push schema + functions (creates tables & indexes)
+bunx convex dev --once
+
+# 2) Choose your own strong seed secret and configure it on the deployment
+#    (there is NO repository default — the seed refuses to run without it)
+bunx convex env set SEED_SECRET "<your-own-strong-random-value>"
+
+# 3) Run the idempotent seed / repair
+bunx convex run seed:seedAll '{"secret":"<your-own-strong-random-value>"}'
 ```
 
 The seed is idempotent — it skips if schools already exist, but **always**
@@ -190,23 +235,43 @@ admin; signing in as either only ever returns that school's data.
 
 ## Testing
 
-A full end-to-end authentication suite lives in `scripts/e2e-auth.mjs`. It seeds
-(idempotently) and then verifies against a live backend:
+Two suites live in `scripts/`. Both require the deployment's configured
+`SEED_SECRET` (they run the idempotent seed/repair first) and only create
+`SMOKE-`/`smoke-`/`e2e-`-prefixed test records, which are archived or deactivated
+at the end — seeded demo data is never modified or destroyed.
+
+**Smoke test** (`scripts/smoke.ts`) — auth, RBAC, tenant isolation and CRUD:
 
 ```bash
-bun scripts/e2e-auth.mjs https://<deployment>.convex.cloud
+SMOKE_CONVEX_URL=https://<deployment>.convex.cloud SEED_SECRET=<secret> bun scripts/smoke.ts
 ```
 
-The suite verifies:
+Covers: valid demo authentication (all roles), invalid-password rejection,
+unknown-user rejection, disabled-user rejection, super-admin platform access,
+school-admin school access, teacher RBAC restrictions, Greenfield/Riverside
+tenant isolation, forged cross-school record-ID rejection, student
+create/update/archive, duplicate admission-number rejection, guardian creation
+and linking, academic-year enrollment history, staff creation, duplicate teacher
+allocation rejection, and the admin-created-user lifecycle (authenticate →
+resolve membership → deactivate).
 
-- **Seeding:** idempotent; no duplicate schools/users on re-run.
-- **Auth:** valid sign-in issues tokens; sessions resolve (`team:me`); a fresh
-  client with the stored JWT still resolves the same user (refresh persistence);
-  invalid password and unknown users are rejected; disabled users cannot
-  authenticate (enforced inside the credentials provider itself); admin-created
-  users can sign in (no public signup); logout invalidates the refresh token.
-- **Tenant isolation:** school admins only ever see their own school's students;
-  cross-school reads by forged IDs are rejected.
+**End-to-end auth suite** (`scripts/e2e-auth.mjs`) — deeper auth-lifecycle
+checks (session refresh persistence, logout refresh-token invalidation, canonical
+membership mapping per account, cross-module tenant isolation, RBAC denials,
+platform/school user provisioning):
+
+```bash
+SEED_SECRET=<secret> bun scripts/e2e-auth.mjs https://<deployment>.convex.cloud
+```
+
+**Repair/membership audit** (`scripts/prod-repair.mjs`, `scripts/user-map.mjs`)
+— idempotent self-heal of demo-account memberships and a canonical user map per
+account:
+
+```bash
+SEED_SECRET=<secret> bun scripts/prod-repair.mjs https://<deployment>.convex.cloud
+SEED_SECRET=<secret> bun scripts/user-map.mjs https://<deployment>.convex.cloud
+```
 
 ## Security notes
 

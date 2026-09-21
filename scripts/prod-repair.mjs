@@ -14,7 +14,11 @@ if (!url) {
 const { anyApi } = await import("convex/server");
 const { ConvexHttpClient } = await import("convex/browser");
 
-const SEED_SECRET = "schoolcore-dev-seed"; // documented demo guard, not a production secret
+const SEED_SECRET = process.env.SEED_SECRET;
+if (!SEED_SECRET) {
+  console.error("SEED_SECRET is required (must match the deployment's configured seed secret).");
+  process.exit(1);
+}
 const DEMO_ACCOUNTS = [
   "admin@schoolcore.dev",
   "admin@greenfield.ac.ke",

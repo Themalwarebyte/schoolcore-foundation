@@ -257,7 +257,6 @@ export const archive = mutation({
   args: { staffId: v.id("staff"), status: v.union(v.literal("archived"), v.literal("terminated"), v.literal("retired")) },
   handler: async (ctx, { staffId, status }) => {
     const session = await requirePermission(ctx, "staff.archive");
-    const { getSchoolRecord } = await import("./session");
     const member = await getSchoolRecord(ctx, session.schoolId as Id<"schools">, "staff", staffId);
     await ctx.db.patch(staffId, {
       employmentStatus: status,
