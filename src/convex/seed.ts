@@ -66,7 +66,15 @@ export const seedAll = action({
         { email: "admin@riverside.ac.ke", password: "Riverside#2026", role: "school_admin", schoolId: rvId ?? undefined },
       ];
       for (const acct of reaccounts) {
-        await ctx.runAction(internal.accounts.ensureDemoAccountAccess, acct);
+        const userId = await ctx.runAction(internal.accounts.ensureDemoAccountAccess, acct);
+        if (acct.email === "grace.wanjiku@greenfield.ac.ke" && gfId) {
+          // Keep the staff record's user link on the canonical auth user.
+          await ctx.runMutation(internal.seedHelpers.alignStaffUserLink, {
+            schoolId: gfId,
+            email: acct.email,
+            userId,
+          });
+        }
       }
       return { skipped: true as const, message: "Seed data already present. Bootstrap admin + demo accounts ensured." };
     }
@@ -206,8 +214,9 @@ export const seedAll = action({
       role: "teacher",
       schoolId: greenfieldId,
     });
-    await ctx.runMutation(internal.seedHelpers.linkStaffUserById, {
-      staffId: staffIds[0],
+    await ctx.runMutation(internal.seedHelpers.alignStaffUserLink, {
+      schoolId: greenfieldId,
+      email: "grace.wanjiku@greenfield.ac.ke",
       userId: graceUserId,
     });
 
