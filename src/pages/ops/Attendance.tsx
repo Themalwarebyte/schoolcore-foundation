@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
-import { PageHeader, Can } from "@/components/layouts/school-layout";
+import { PageHeader } from "@/components/layouts/school-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/lib/status";

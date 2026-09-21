@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
@@ -19,7 +19,7 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { ClassSelect, ScopeBar, SubjectSelect, TermSelect, YearSelect } from "@/components/ops/Controls";
+import { ClassSelect, ScopeBar, TermSelect, YearSelect } from "@/components/ops/Controls";
 import { cn } from "@/lib/utils";
 import { ArrowLeft, ClipboardList, Plus } from "lucide-react";
 
@@ -183,7 +183,6 @@ export default function Assessments() {
         onOpenChange={setOpen}
         yearId={yearId}
         termId={termId}
-        classSectionId={classSectionId}
       />
     </div>
   );
@@ -219,10 +218,10 @@ function StatusActions({ id, status }: { id: string; status: string }) {
 /* ------------------------- Create dialog ----------------------------- */
 
 function CreateDialog({
-  open, onOpenChange, yearId, termId, classSectionId,
+  open, onOpenChange, yearId, termId,
 }: {
   open: boolean; onOpenChange: (v: boolean) => void;
-  yearId: string; termId: string; classSectionId: string;
+  yearId: string; termId: string;
 }) {
   const allocations = useQuery(
     api.assignments.myAllocationOptions,
@@ -364,22 +363,24 @@ function MarksGrid({
   const [saving, setSaving] = useState(false);
   const editable = grid?.editable ?? false;
 
-  const rows: GridRow[] = grid?.rows ?? [];
+  const rows: GridRow[] = useMemo(() => grid?.rows ?? [], [grid]);
   const key = `${assessmentId}`;
 
-  useEffect(() => {
-    if (grid && seeded !== key) {
-      const nextScores: Record<string, string> = {};
-      const nextAbsents: Record<string, "absent" | "exempt"> = {};
-      for (const r of rows) {
-        if (r.markStatus === "entered" && r.score != null) nextScores[r.studentId] = String(r.score);
-        if (r.markStatus === "absent" || r.markStatus === "exempt") nextAbsents[r.studentId] = r.markStatus;
-      }
-      setScores(nextScores);
-      setAbsents(nextAbsents);
-      setSeeded(key);
+  // Seed the local editing state once per assessment when the grid loads.
+  // Derive-and-spread (instead of setState-in-useEffect) to avoid cascading renders.
+  const [lastSeededKey, setLastSeededKey] = useState<string | null>(null);
+  if (grid && lastSeededKey !== key) {
+    const nextScores: Record<string, string> = {};
+    const nextAbsents: Record<string, "absent" | "exempt"> = {};
+    for (const r of rows) {
+      if (r.markStatus === "entered" && r.score != null) nextScores[r.studentId] = String(r.score);
+      if (r.markStatus === "absent" || r.markStatus === "exempt") nextAbsents[r.studentId] = r.markStatus;
     }
-  }, [grid, rows, seeded, key]);
+    setScores(nextScores);
+    setAbsents(nextAbsents);
+    setLastSeededKey(key);
+    setSeeded(key);
+  }
 
   const buildMarks = () =>
     rows

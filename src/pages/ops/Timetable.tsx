@@ -2,10 +2,9 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
-import { PageHeader, Can } from "@/components/layouts/school-layout";
+import { PageHeader } from "@/components/layouts/school-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { StatusBadge } from "@/lib/status";
 import { usePermissions } from "@/hooks/use-session";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -256,7 +255,6 @@ function EntryDialog({
     open && yearId ? { academicYearId: yearId as never } : "skip",
   );
   const create = useMutation(api.timetable.createEntry);
-  const del = useMutation(api.timetable.deleteEntry);
 
   const [classSectionId, setClassSectionId] = useState("");
   const [subjectId, setSubjectId] = useState("");

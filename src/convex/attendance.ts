@@ -491,7 +491,7 @@ async function createSessionInternal(
     }
   }
   const sessionStaffId = await myStaffId(ctx, schoolId, session.userId);
-  return ctx.db.insert("attendanceSessions", {
+  const sessionId = await ctx.db.insert("attendanceSessions", {
     schoolId,
     academicYearId: section.academicYearId,
     termId: activeTerm._id,
@@ -504,6 +504,16 @@ async function createSessionInternal(
     recordedById: session.userId,
     createdAt: Date.now(),
   });
+  await recordAudit(ctx, {
+    userId: session.userId,
+    schoolId,
+    action: "attendance.session_created",
+    entityType: "attendanceSessions",
+    entityId: sessionId,
+    description: `${args.sessionType === "daily" ? "Daily" : "Lesson"} attendance session opened`,
+    metadata: { date: args.date },
+  });
+  return sessionId;
 }
 
 export const reopenSession = mutation({

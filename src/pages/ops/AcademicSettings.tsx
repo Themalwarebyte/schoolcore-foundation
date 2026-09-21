@@ -42,9 +42,14 @@ export default function AcademicSettings() {
   const [form, setForm] = useState<Settings | null>(null);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (settings && form === null) setForm(settings);
-  }, [settings, form]);
+  // Derive the editable form from the server settings; once the user has edited
+  // it (form !== null), server updates no longer overwrite local state.
+  const [lastSynced, setLastSynced] = useState<object | null>(null);
+  if (settings && form === null) {
+    setForm(settings);
+    setLastSynced(settings);
+  }
+  void lastSynced;
 
   if (!form) {
     return (
