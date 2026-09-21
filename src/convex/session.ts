@@ -156,7 +156,21 @@ type SchoolScopedTable =
   | "subjects"
   | "teacherAllocations"
   | "enrollments"
-  | "guardianStudents";
+  | "guardianStudents"
+  | "timetablePeriods"
+  | "rooms"
+  | "timetableEntries"
+  | "attendanceSessions"
+  | "attendanceRecords"
+  | "assignments"
+  | "assignmentRecipients"
+  | "assessmentTypes"
+  | "assessments"
+  | "assessmentScores"
+  | "gradingSchemes"
+  | "gradeBands"
+  | "subjectResults"
+  | "reportCards";
 
 /**
  * Fetch a school-scoped record by ID and verify it belongs to the caller's
