@@ -1,1 +1,0 @@
-import{j as o}from"./radix-ui-CUT9Oo-V.js";import{h as s}from"./index-BXD9xcq4.js";function r({className:t,...e}){return o.jsx("div",{"data-slot":"skeleton",className:s("bg-accent animate-pulse rounded-md",t),...e})}export{r as S};
