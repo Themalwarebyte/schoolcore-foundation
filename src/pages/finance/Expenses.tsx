@@ -28,6 +28,7 @@ export default function Expenses() {
   const createExpense = useMutation(api.financeOps.createExpense);
   const submitExpense = useMutation(api.financeOps.submitExpense);
   const approveExpense = useMutation(api.financeOps.approveExpense);
+  const payExpense = useMutation(api.financeOps.payExpense);
   const rejectExpense = useMutation(api.financeOps.rejectExpense);
 
   const [open, setOpen] = useState(false);
@@ -135,7 +136,7 @@ export default function Expenses() {
                       {e.status === "approved" && (
                         <Can permission="expenses.approve">
                           <Button size="sm" variant="outline" onClick={async () => {
-                            try { await approveExpense({ expenseId: e._id as never, payNow: true }); toast.success("Expense marked paid and posted to the ledger"); }
+                            try { await payExpense({ expenseId: e._id as never }); toast.success("Expense paid and posted to the ledger"); }
                             catch (err) { toast.error(err instanceof Error ? err.message : "Failed"); }
                           }}>
                             Mark paid

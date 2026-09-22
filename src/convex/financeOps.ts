@@ -153,6 +153,37 @@ export const rejectExpense = mutation({
   },
 });
 
+/* Pay an already-approved expense. Separate step so approver ≠ payer when desired. */
+export const payExpense = mutation({
+  args: { expenseId: v.id("expenses") },
+  handler: async (ctx, { expenseId }) => {
+    const session = await requirePermission(ctx, "expenses.approve");
+    const schoolId = session.schoolId as Id<"schools">;
+    const e = await getSchoolRecord(ctx, schoolId, "expenses", expenseId);
+    if (e.status !== "approved") throw new ConvexError("Only approved expenses can be paid.");
+    const txnId = await postLedgerTransaction(ctx, schoolId, session.userId, {
+      transactionType: "expense",
+      date: e.expenseDate,
+      amount: e.amount,
+      description: `Expense ${e.expenseNumber} — ${e.payee}`,
+      expenseId,
+      lines: [
+        { code: ACC.EXPENSES_CLEARING, direction: "debit", amount: e.amount },
+        { code: ACC.CASH, direction: "credit", amount: e.amount },
+      ],
+    });
+    await ctx.db.patch(expenseId, {
+      status: "paid", paidTransactionId: txnId, approvedById: session.userId,
+      approvedAt: e.approvedAt ?? Date.now(), updatedAt: Date.now(),
+    });
+    await recordAudit(ctx, {
+      userId: session.userId, schoolId, action: "expense.paid", entityType: "expenses",
+      entityId: expenseId, description: `Expense ${e.expenseNumber} paid (${e.amount} to ${e.payee})`,
+    });
+    return { ok: true, transactionId: txnId };
+  },
+});
+
 /* ================================================================== */
 /* Finance dashboard                                                   */
 /* ================================================================== */

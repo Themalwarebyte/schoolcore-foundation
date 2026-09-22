@@ -231,6 +231,10 @@ admin; signing in as either only ever returns that school's data.
 - 80 students with guardians (sibling groups share guardians), 11 staff, 8 subjects
 - 2026 academic year, 3 terms, 6 grade levels, 6 class sections
 - Teacher allocations across classes and subjects
+- Fee structures per term/grade (tuition, transport, meals, activity), invoices
+  for every active student (some fully paid, partially paid, unpaid, discounted),
+  payments with sequential `REC-` receipts, discounts/scholarships, and approved
+  expense records — all posted through the double-entry ledger per school
 - Audit entries for the seed actions
 
 ## Testing
@@ -273,6 +277,24 @@ SEED_SECRET=<secret> bun scripts/prod-repair.mjs https://<deployment>.convex.clo
 SEED_SECRET=<secret> bun scripts/user-map.mjs https://<deployment>.convex.cloud
 ```
 
+**Phase 2 academic suite** (`scripts/phase2.test.ts`) — attendance (daily +
+lesson), timetable conflicts, assignments, assessments, mark entry, grading
+boundaries, weighted results, ranking, result approval/publication, report-card
+snapshots, teacher authorization, cross-school isolation:
+
+```bash
+SMOKE_CONVEX_URL=https://<deployment>.convex.cloud SEED_SECRET=<secret> bun test scripts/phase2.test.ts
+```
+
+**Phase 3 finance suite** (`scripts/phase3.test.ts`) — fee structures, billing,
+invoices, payments + receipts, duplicate-reference rejection, discounts,
+refunds, expenses (creator ≠ approver RBAC), ledger balance, statements,
+report/dashboard reconciliation, historical integrity, tenant isolation:
+
+```bash
+SMOKE_CONVEX_URL=https://<deployment>.convex.cloud SEED_SECRET=<secret> bun test scripts/phase3.test.ts
+```
+
 ## Security notes
 
 - A previously committed `.env.keys` (containing a `DOTENV_PRIVATE_KEY_LOCAL`)
@@ -301,10 +323,28 @@ Academic years · Terms · Grade levels · Classes/streams · Subjects · Enroll
 Teacher allocations · School settings · Live dashboard · Global search (⌘K) ·
 Audit logs · Responsive UI · Seed data · Demo accounts · Tests · README
 
+## Phase 2 feature checklist
+
+Daily + lesson attendance · Timetables (class/teacher/whole-school views from one
+dataset, collision detection) · Assignments · Assessments · Mark entry · Grading
+schemes · Weighted results · Ranking · Result review/approval/publication ·
+Report cards (single + bulk class PDF) · Academic analytics
+
+## Phase 3 feature checklist
+
+Fee structures · Bulk billing · Invoices (draft → issued → partially paid →
+paid / overdue, cancellation with audit trail) · Student financial accounts ·
+Double-entry ledger · Payments (duplicate-reference rejection, reversal) ·
+Sequential receipts (`REC-YYYY-#####`) with PDF · Discounts (request → approve →
+apply) · Scholarships/bursaries · Refunds (request → approve → ledger) ·
+Expenses with approval workflow (creator ≠ approver) · Chart-of-accounts
+foundation · Revenue/payments/outstanding/expense/cash reports · Trial balance ·
+Account statements with PDF · Finance dashboard · Parent-portal-ready data model
+
 ## Intentionally deferred (future phases)
 
-Attendance, timetables, assignments, exams, report cards, fees, payments, payroll,
-library, transport, boarding, inventory, procurement, clinic, communications
-(M-Pesa/SMS/email), parent/student/teacher portals, analytics. The Phase 1 models
-(student ID + school ID everywhere, enrollment by year, allocations per year/term)
-are shaped so these modules attach without rework.
+HR, payroll, library, transport, boarding, inventory, procurement, clinic,
+communications (M-Pesa/SMS/email), parent/student/teacher portals, payment
+gateway integrations, advanced analytics. The Phase 1–3 models (student ID +
+school ID everywhere, enrollment by year, allocations per year/term, ledgered
+student accounts) are shaped so these modules attach without rework.
