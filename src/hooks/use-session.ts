@@ -94,6 +94,14 @@ const ROLE_PERMISSIONS: Record<SessionRole, string[]> = {
     "results.view", "results.review", "results.approve", "results.publish",
     "report_cards.view", "report_cards.generate", "report_cards.publish",
     "academic_analytics.view",
+    // Phase 3: finance
+    "finance.view", "finance.manage", "fees.manage",
+    "billing.view", "billing.create",
+    "payments.create", "payments.approve",
+    "receipts.view", "receipts.print",
+    "discounts.manage", "scholarships.manage",
+    "expenses.create", "expenses.approve",
+    "financial_reports.view",
   ],
   principal: [
     "dashboard.view", "school.view", "school.update", "students.view", "students.create",
@@ -112,6 +120,9 @@ const ROLE_PERMISSIONS: Record<SessionRole, string[]> = {
     "results.view", "results.review", "results.approve", "results.publish",
     "report_cards.view", "report_cards.generate", "report_cards.publish",
     "academic_analytics.view",
+    // Phase 3: finance summaries + approval authorities
+    "finance.view", "billing.view", "receipts.view", "financial_reports.view",
+    "discounts.manage", "scholarships.manage", "expenses.approve",
   ],
   teacher: [
     "dashboard.view", "school.view", "students.view", "guardians.view",
@@ -130,6 +141,14 @@ const ROLE_PERMISSIONS: Record<SessionRole, string[]> = {
   accountant: [
     "dashboard.view", "school.view", "students.view", "guardians.view",
     "staff.view", "academics.view", "settings.view",
+    // Phase 3: finance — primary finance user
+    "finance.view", "fees.manage",
+    "billing.view", "billing.create",
+    "payments.create", "payments.approve",
+    "receipts.view", "receipts.print",
+    "discounts.manage", "scholarships.manage",
+    "expenses.create",
+    "financial_reports.view",
   ],
   parent: ["dashboard.view", "school.view"],
   student: ["dashboard.view", "school.view"],

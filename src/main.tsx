@@ -40,6 +40,14 @@ const ReportCards = lazy(() => import("./pages/ops/ReportCards.tsx"));
 const ReportCardView = lazy(() => import("./pages/ops/ReportCardView.tsx"));
 const Analytics = lazy(() => import("./pages/ops/Analytics.tsx"));
 const AcademicSettings = lazy(() => import("./pages/ops/AcademicSettings.tsx"));
+const FinanceDashboard = lazy(() => import("./pages/finance/FinanceDashboard.tsx"));
+const Fees = lazy(() => import("./pages/finance/Fees.tsx"));
+const Invoices = lazy(() => import("./pages/finance/Invoices.tsx"));
+const Payments = lazy(() => import("./pages/finance/Payments.tsx"));
+const Accounts = lazy(() => import("./pages/finance/Accounts.tsx"));
+const Discounts = lazy(() => import("./pages/finance/Discounts.tsx"));
+const Expenses = lazy(() => import("./pages/finance/Expenses.tsx"));
+const Reports = lazy(() => import("./pages/finance/Reports.tsx"));
 const PlatformDashboard = lazy(() => import("./pages/platform/PlatformDashboard.tsx"));
 const PlatformSchools = lazy(() => import("./pages/platform/Schools.tsx"));
 const PlatformUsers = lazy(() => import("./pages/platform/PlatformUsers.tsx"));
@@ -188,6 +196,14 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="/report-cards" element={<ReportCards />} />
                 <Route path="/report-cards/:reportCardId" element={<ReportCardView />} />
                 <Route path="/analytics" element={<Analytics />} />
+                <Route path="/finance" element={<FinanceDashboard />} />
+                <Route path="/finance/fees" element={<Fees />} />
+                <Route path="/finance/invoices" element={<Invoices />} />
+                <Route path="/finance/payments" element={<Payments />} />
+                <Route path="/finance/accounts" element={<Accounts />} />
+                <Route path="/finance/discounts" element={<Discounts />} />
+                <Route path="/finance/expenses" element={<Expenses />} />
+                <Route path="/finance/reports" element={<Reports />} />
               </Route>
 
               {/* Platform super-admin area */}
