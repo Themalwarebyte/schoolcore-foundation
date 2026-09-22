@@ -309,14 +309,22 @@ export const ensureAccount = mutation({
 export async function refreshInvoiceStatus(ctx: MutationCtx, invoiceId: Id<"invoices">): Promise<string> {
   const inv = await ctx.db.get(invoiceId);
   if (!inv || inv.status === "cancelled") return inv?.status ?? "";
-  const txns = await ctx.db
-    .query("ledgerTransactions")
+  // Live settlement is derived from the payments/discounts tables (reversed
+  // payments excluded). The ledger is append-only, so reversed payments keep
+  // their original transactions and cannot be summed for a live balance.
+  const settledPayments = await ctx.db
+    .query("payments")
     .withIndex("by_invoice", (q) => q.eq("invoiceId", invoiceId))
+    .filter((q) => q.neq(q.field("status"), "reversed"))
     .collect();
-  let settled = 0;
-  for (const t of txns) {
-    if (t.transactionType === "payment" || t.transactionType === "discount") settled += t.amount;
-  }
+  const settledDiscounts = await ctx.db
+    .query("discounts")
+    .withIndex("by_invoice", (q) => q.eq("invoiceId", invoiceId))
+    .filter((q) => q.eq(q.field("status"), "applied"))
+    .collect();
+  const settled =
+    settledPayments.reduce((s, p) => s + p.amount, 0) +
+    settledDiscounts.reduce((s, d) => s + d.computedAmount, 0);
   const today = new Date().toISOString().slice(0, 10);
   let next = inv.status;
   if (settled >= inv.totalAmount - 0.001) next = "paid";
@@ -383,16 +391,20 @@ export const invoiceDetail = query({
     const term = await ctx.db.get(inv.termId);
     const year = await ctx.db.get(inv.academicYearId);
     const school = await ctx.db.get(schoolId);
-    const txns = await ctx.db
-      .query("ledgerTransactions")
+    // Same rule as refreshInvoiceStatus: live totals from payments/discounts
+    // tables (reversed excluded), never from append-only ledger history.
+    const livePayments = await ctx.db
+      .query("payments")
       .withIndex("by_invoice", (q) => q.eq("invoiceId", invoiceId))
+      .filter((q) => q.neq(q.field("status"), "reversed"))
       .collect();
-    let paid = 0;
-    let discounted = 0;
-    for (const t of txns) {
-      if (t.transactionType === "payment") paid += t.amount;
-      else if (t.transactionType === "discount") discounted += t.amount;
-    }
+    const liveDiscounts = await ctx.db
+      .query("discounts")
+      .withIndex("by_invoice", (q) => q.eq("invoiceId", invoiceId))
+      .filter((q) => q.eq(q.field("status"), "applied"))
+      .collect();
+    const paid = livePayments.reduce((s, p) => s + p.amount, 0);
+    const discounted = liveDiscounts.reduce((s, d) => s + d.computedAmount, 0);
     return {
       invoice: {
         _id: inv._id, invoiceNumber: inv.invoiceNumber, issueDate: inv.issueDate, dueDate: inv.dueDate,
@@ -540,8 +552,16 @@ export const cancelInvoice = mutation({
       .query("ledgerTransactions")
       .withIndex("by_invoice", (q) => q.eq("invoiceId", invoiceId))
       .collect();
-    if (txns.some((t) => t.transactionType === "payment")) {
-      throw new ConvexError("This invoice has payments recorded. Reverse the payments first, then cancel.");
+    // The ledger is append-only, so reversed payments leave their original
+    // transactions behind. Cancellation only requires that no *active*
+    // payment remains — check the payments table, not transaction history.
+    const activePayments = await ctx.db
+      .query("payments")
+      .withIndex("by_invoice", (q) => q.eq("invoiceId", invoiceId))
+      .filter((q) => q.neq(q.field("status"), "reversed"))
+      .collect();
+    if (activePayments.length > 0) {
+      throw new ConvexError("This invoice has active payments. Reverse the payments first, then cancel.");
     }
     // Reverse the original receivable posting (issuance + any applied discounts).
     const invoiceTxn = txns.find((t) => t.transactionType === "invoice");

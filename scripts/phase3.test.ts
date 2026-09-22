@@ -187,10 +187,11 @@ try {
     check("statement lines derive from ledger (invoice debit + payment credit)",
       (stmt?.lines ?? []).some((l: { type: string; debit: number }) => l.type === "invoice" && l.debit > 0) &&
       (stmt?.lines ?? []).some((l: { type: string; credit: number }) => l.type === "payment" && l.credit > 0));
-    const invoiceLine = (stmt?.lines ?? []).find((l: { type: string }) => l.type === "invoice");
-    const paymentLine = (stmt?.lines ?? []).filter((l: { type: string }) => l.type === "payment").pop();
+    // The statement's final line's running balance must equal closingBalance
+    // (reversal/refund lines can follow payments, so don't anchor on type).
+    const lastLine = (stmt?.lines ?? [])[(stmt?.lines ?? []).length - 1];
     check("statement running balance ends at expected student balance",
-      paymentLine !== undefined ? stmt?.closingBalance === paymentLine.balance : true);
+      lastLine ? stmt?.closingBalance === lastLine.balance : true);
 
     // Reverse the payment; balance must return.
     if (pay1?.paymentId) {
@@ -240,10 +241,12 @@ try {
   check("expense created (draft)", !!expenseId);
   const submitted = await accClient.mutation(anyApi.financeOps.submitExpense, { expenseId: expenseId as never });
   check("expense submitted", !!submitted);
-  const approved = await accClient.mutation(anyApi.financeOps.approveExpense, { expenseId: expenseId as never });
-  check("expense approved", !!approved);
-  const paidExpense = await accClient.mutation(anyApi.financeOps.approveExpense, { expenseId: expenseId as never, payNow: true });
-  check("expense paid (ledger-posted)", !!paidExpense);
+  const expApproveErr = await errOf(() => accClient.mutation(anyApi.financeOps.approveExpense, { expenseId: expenseId as never }));
+  check("accountant cannot approve own expense (creator ≠ approver)", expApproveErr !== null, expApproveErr ?? "allowed");
+  const approved = await gfClient.mutation(anyApi.financeOps.approveExpense, { expenseId: expenseId as never });
+  check("expense approved by school admin", !!approved);
+  const paidExpense = await gfClient.mutation(anyApi.financeOps.payExpense, { expenseId: expenseId as never });
+  check("expense paid (ledger-posted)", !!paidExpense?.transactionId);
   const trial3 = await accClient.query(anyApi.financeOps.trialBalance, {});
   check("ledger balanced after expense", trial3?.balanced === true);
   const expReport = await accClient.query(anyApi.financeOps.expenseReport, { from: "2026-01-01", to: "2026-12-31" });
