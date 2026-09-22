@@ -81,6 +81,31 @@ export const approveExpense = mutation({
     const session = await requirePermission(ctx, "expenses.approve");
     const schoolId = session.schoolId as Id<"schools">;
     const e = await getSchoolRecord(ctx, schoolId, "expenses", expenseId);
+    // approve: submitted → approved. payNow on an already-approved expense
+    // settles it (approved → paid), e.g. the UI's "Mark paid" action.
+    if (payNow && e.status === "approved") {
+      const txnId = await postLedgerTransaction(ctx, schoolId, session.userId, {
+        transactionType: "expense",
+        date: e.expenseDate,
+        amount: e.amount,
+        description: `Expense ${e.expenseNumber} — ${e.payee}`,
+        expenseId,
+        lines: [
+          { code: ACC.EXPENSES_CLEARING, direction: "debit", amount: e.amount },
+          { code: ACC.CASH, direction: "credit", amount: e.amount },
+        ],
+      });
+      await ctx.db.patch(expenseId, {
+        status: "paid", approvedById: e.approvedById ?? session.userId,
+        approvedAt: e.approvedAt ?? Date.now(),
+        paidTransactionId: txnId, updatedAt: Date.now(),
+      });
+      await recordAudit(ctx, {
+        userId: session.userId, schoolId, action: "expense.paid", entityType: "expenses",
+        entityId: expenseId, description: `Expense ${e.expenseNumber} marked paid and posted to the ledger (${e.amount} to ${e.payee})`,
+      });
+      return { ok: true };
+    }
     if (e.status !== "submitted") throw new ConvexError("Only submitted expenses can be approved.");
     if (payNow) {
       const txnId = await postLedgerTransaction(ctx, schoolId, session.userId, {
