@@ -836,6 +836,458 @@ export const seedAcademicOps = internalMutation({
 });
 
 /* ------------------------------------------------------------------ */
+/* Phase 3: finance demo data (idempotent). Adds fee structures,        */
+/* invoices, payments, receipts, discounts, scholarships and expenses   */
+/* through the REAL finance engines (ledger postings included) so the   */
+/* dashboards and reports show genuine, reconciled figures.             */
+/* ------------------------------------------------------------------ */
+
+const FINANCE_ACCOUNTS: Array<{ code: string; name: string; accountType: string }> = [
+  { code: "1000", name: "Cash on Hand", accountType: "asset" },
+  { code: "1015", name: "Mobile Money", accountType: "asset" },
+  { code: "1020", name: "Bank Account", accountType: "asset" },
+  { code: "1200", name: "Accounts Receivable — Fees", accountType: "asset" },
+  { code: "4000", name: "Tuition & Fee Revenue", accountType: "revenue" },
+  { code: "4800", name: "Discounts & Waivers", accountType: "expense" },
+  { code: "5000", name: "Operating Expenses", accountType: "expense" },
+];
+
+export const seedFinance = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const schools = await ctx.db.query("schools").collect();
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+
+    for (const school of schools) {
+      /* 1. Chart of accounts ------------------------------------------ */
+      const existingAccounts = await ctx.db
+        .query("ledgerAccounts")
+        .withIndex("by_school", (q) => q.eq("schoolId", school._id))
+        .collect();
+      for (const a of FINANCE_ACCOUNTS) {
+        if (!existingAccounts.some((e) => e.code === a.code)) {
+          await ctx.db.insert("ledgerAccounts", { schoolId: school._id, ...a, status: "active" });
+        }
+      }
+
+      /* 2. Fee categories + payment methods --------------------------- */
+      const categories = await ctx.db.query("feeCategories").withIndex("by_school", (q) => q.eq("schoolId", school._id)).collect();
+      if (categories.length === 0) {
+        for (const c of ["Tuition", "Transport", "Meals", "Activity", "Examination"]) {
+          await ctx.db.insert("feeCategories", { schoolId: school._id, name: c, status: "active" });
+        }
+      }
+      const methods = await ctx.db.query("paymentMethods").withIndex("by_school", (q) => q.eq("schoolId", school._id)).collect();
+      if (methods.length === 0) {
+        for (const m of [
+          { name: "Cash", integrationKey: "cash" },
+          { name: "Bank Transfer", integrationKey: "bank_transfer" },
+          { name: "Mobile Money", integrationKey: "mobile_money" },
+          { name: "Card", integrationKey: "card" },
+          { name: "Cheque", integrationKey: "cheque" },
+        ]) {
+          await ctx.db.insert("paymentMethods", { schoolId: school._id, ...m, status: "active" });
+        }
+      }
+
+      /* 3. Academic context ------------------------------------------- */
+      const year = await ctx.db
+        .query("academicYears")
+        .withIndex("by_school_current", (q) => q.eq("schoolId", school._id).eq("isCurrent", true))
+        .first();
+      if (!year) continue;
+      const terms = (await ctx.db.query("terms").withIndex("by_academic_year", (q) => q.eq("academicYearId", year._id)).collect())
+        .sort((a, b) => a.displayOrder - b.displayOrder);
+      const term1 = terms[0];
+      if (!term1) continue;
+
+      const staff = await ctx.db.query("staff").withIndex("by_school", (q) => q.eq("schoolId", school._id)).collect();
+      const bursar = staff.find((s) => s.jobTitle === "Bursar");
+      const actorRow = await ctx.db
+        .query("users")
+        .withIndex("email", (q) => q.eq("email", school.code === "GRN-001" ? "accounts@greenfield.ac.ke" : "admin@riverside.ac.ke"))
+        .first();
+      const approverRow = await ctx.db
+        .query("users")
+        .withIndex("email", (q) => q.eq("email", school.code === "GRN-001" ? "admin@greenfield.ac.ke" : "admin@riverside.ac.ke"))
+        .first();
+      if (!actorRow || !approverRow) continue;
+      const actor = actorRow._id;
+      const approver = approverRow._id;
+
+      /* 4. Fee structure for Term 1 (all classes) --------------------- */
+      let structure = (await ctx.db.query("feeStructures").withIndex("by_term", (q) => q.eq("termId", term1._id)).collect())
+        .find((f) => f.schoolId === school._id);
+      if (!structure) {
+        const structureId = await ctx.db.insert("feeStructures", {
+          schoolId: school._id,
+          academicYearId: year._id,
+          termId: term1._id,
+          name: "Term 1 Standard Fees",
+          applicableGradeLevelIds: [],
+          status: "active",
+          createdBy: approver,
+        });
+        const boarding = school.code === "GRN-001" ? 5000 : 6000;
+        for (const item of [
+          { name: "Tuition", category: "Tuition", amount: 40000, mandatory: true },
+          { name: "Transport", category: "Transport", amount: 5000, mandatory: false },
+          { name: "Meals", category: "Meals", amount: 8000, mandatory: true },
+          { name: "Activity", category: "Activity", amount: 2000, mandatory: true },
+          { name: "Boarding Supplement", category: "Boarding", amount: boarding, mandatory: false },
+        ]) {
+          await ctx.db.insert("feeItems", { schoolId: school._id, feeStructureId: structureId, ...item, status: "active" });
+        }
+        structure = (await ctx.db.get(structureId)) ?? undefined;
+      }
+      if (!structure) continue;
+      const structureItems = (await ctx.db.query("feeItems").withIndex("by_structure", (q) => q.eq("feeStructureId", structure._id)).collect())
+        .filter((i) => i.status === "active");
+
+      /* 5. Bill every active enrolled student (ledger-posted) --------- */
+      const enrollments = (
+        await ctx.db.query("enrollments").withIndex("by_school", (q) => q.eq("schoolId", school._id)).collect()
+      ).filter((e) => e.status === "active" && e.academicYearId === year._id);
+      const existingInvoices = (await ctx.db.query("invoices").withIndex("by_school", (q) => q.eq("schoolId", school._id)).collect())
+        .filter((i) => i.termId === term1._id);
+      const billedStudents = new Set(existingInvoices.map((i) => i.studentId));
+
+      const students = await ctx.db.query("students").withIndex("by_school", (q) => q.eq("schoolId", school._id)).collect();
+      const studentById = new Map(students.map((s) => [s._id, s]));
+      const receiptsBySchool = (await ctx.db.query("receipts").withIndex("by_school", (q) => q.eq("schoolId", school._id)).collect()).length;
+
+      // Numbering continuity: derive the current maxima once per school.
+      const numberMax = (rows: string[]) =>
+        rows.reduce((m, num) => {
+          const n = Number(num.split("-").pop());
+          return Number.isFinite(n) ? Math.max(m, n) : m;
+        }, 0);
+      const invoicesAll = await ctx.db.query("invoices").withIndex("by_school", (q) => q.eq("schoolId", school._id)).collect();
+      const paymentsAll = await ctx.db.query("payments").withIndex("by_school", (q) => q.eq("schoolId", school._id)).collect();
+      const txnsAll = await ctx.db.query("ledgerTransactions").withIndex("by_school", (q) => q.eq("schoolId", school._id)).collect();
+      let invSeq = numberMax(invoicesAll.map((i) => i.invoiceNumber));
+      let paySeq = numberMax(paymentsAll.map((p) => p.paymentNumber));
+      let recSeq = numberMax(receiptsBySchool === 0 ? [] : (await ctx.db.query("receipts").withIndex("by_school", (q) => q.eq("schoolId", school._id)).collect()).map((r) => r.receiptNumber));
+      let txnSeq = numberMax(txnsAll.map((t) => t.transactionNumber));
+      const yearLabel = year.name;
+      const pad = (n: number) => String(n).padStart(5, "0");
+      const nextDoc = (prefix: string, seq: number) => `${prefix}-${yearLabel}-${pad(seq)}`;
+
+      const receivable = await ctx.db
+        .query("ledgerAccounts")
+        .withIndex("by_school_code", (q) => q.eq("schoolId", school._id).eq("code", "1200"))
+        .first();
+      const revenue = await ctx.db
+        .query("ledgerAccounts")
+        .withIndex("by_school_code", (q) => q.eq("schoolId", school._id).eq("code", "4000"))
+        .first();
+      const cashAcc = await ctx.db
+        .query("ledgerAccounts")
+        .withIndex("by_school_code", (q) => q.eq("schoolId", school._id).eq("code", "1000"))
+        .first();
+      const bankAcc = await ctx.db
+        .query("ledgerAccounts")
+        .withIndex("by_school_code", (q) => q.eq("schoolId", school._id).eq("code", "1020"))
+        .first();
+      const mmAcc = await ctx.db
+        .query("ledgerAccounts")
+        .withIndex("by_school_code", (q) => q.eq("schoolId", school._id).eq("code", "1015"))
+        .first();
+      const discAcc = await ctx.db
+        .query("ledgerAccounts")
+        .withIndex("by_school_code", (q) => q.eq("schoolId", school._id).eq("code", "4800"))
+        .first();
+      const expAcc = await ctx.db
+        .query("ledgerAccounts")
+        .withIndex("by_school_code", (q) => q.eq("schoolId", school._id).eq("code", "5000"))
+        .first();
+      if (!receivable || !revenue || !cashAcc || !bankAcc || !mmAcc || !discAcc || !expAcc) continue;
+
+      const invoiceIds: Array<{ invoiceId: Id<"invoices">; studentId: Id<"students">; total: number; accountId: Id<"studentAccounts"> }> = [];
+      for (const e of enrollments) {
+        if (billedStudents.has(e.studentId)) continue;
+        const student = studentById.get(e.studentId);
+        if (!student) continue;
+        let account = await ctx.db
+          .query("studentAccounts")
+          .withIndex("by_school_student", (q) => q.eq("schoolId", school._id).eq("studentId", student._id))
+          .first();
+        if (!account) {
+          const accountId = await ctx.db.insert("studentAccounts", { schoolId: school._id, studentId: student._id, openingBalance: 0, status: "active" });
+          account = await ctx.db.get(accountId);
+        }
+        if (!account) continue;
+        // Tuition + Meals + Activity for everyone; Transport/Boarding for some.
+        const chosen = structureItems.filter((it) =>
+          it.mandatory || (student.boardingStatus === "boarding" && it.category === "Boarding") || (e.studentId.length % 3 === 0 && it.category === "Transport"),
+        );
+        const items = chosen.length > 0 ? chosen : structureItems;
+        const total = round2(items.reduce((s, i) => s + i.amount, 0));
+        invSeq += 1;
+        const invoiceNumber = nextDoc("INV", invSeq);
+        const invoiceId = await ctx.db.insert("invoices", {
+          schoolId: school._id,
+          invoiceNumber,
+          studentId: student._id,
+          accountId: account._id,
+          academicYearId: year._id,
+          termId: term1._id,
+          issueDate: "2026-01-10",
+          dueDate: "2026-02-10",
+          totalAmount: total,
+          status: "issued",
+          notes: "Seeded term invoice",
+          createdById: actor,
+          issuedAt: Date.now(),
+        });
+        for (const it of items) {
+          await ctx.db.insert("invoiceItems", {
+            schoolId: school._id, invoiceId, description: it.name,
+            category: it.category, quantity: 1, amount: it.amount, sourceFeeItemId: it._id,
+          });
+        }
+        txnSeq += 1;
+        const txnId = await ctx.db.insert("ledgerTransactions", {
+          schoolId: school._id,
+          transactionType: "invoice",
+          transactionNumber: nextDoc("TXN", txnSeq),
+          date: "2026-01-10",
+          amount: total,
+          description: `Invoice ${invoiceNumber} — ${student.firstName} ${student.lastName}`,
+          studentId: student._id,
+          accountId: account._id,
+          invoiceId,
+          createdById: actor,
+          createdAt: Date.now(),
+        });
+        await ctx.db.insert("ledgerEntries", {
+          schoolId: school._id, transactionId: txnId, accountId: receivable._id, direction: "debit", amount: total,
+        });
+        await ctx.db.insert("ledgerEntries", {
+          schoolId: school._id, transactionId: txnId, accountId: revenue._id, direction: "credit", amount: total,
+        });
+        invoiceIds.push({ invoiceId, studentId: student._id, total, accountId: account._id });
+      }
+
+      /* 6. Payments + receipts with realistic spread ------------------ */
+      const payMethods = await ctx.db.query("paymentMethods").withIndex("by_school", (q) => q.eq("schoolId", school._id)).collect();
+      const methodFor = (i: number) => payMethods[i % Math.max(payMethods.length, 1)] ?? { name: "Cash", integrationKey: "cash" as string | undefined };
+      const cashCodeFor = (key?: string) => (key === "mobile_money" ? mmAcc._id : key === "bank_transfer" ? bankAcc._id : cashAcc._id);
+      let seededPayments = 0;
+      for (let idx = 0; idx < invoiceIds.length; idx++) {
+        const { invoiceId, studentId, total, accountId } = invoiceIds[idx];
+        const student = studentById.get(studentId as Id<"students">);
+        if (!student) continue;
+        // Distribution: ~55% fully paid, ~25% half paid, ~20% unpaid.
+        const bucket = idx % 20;
+        const fraction = bucket < 11 ? 1 : bucket < 16 ? 0.5 : 0;
+        if (fraction === 0) continue;
+        const method = methodFor(idx);
+        const amount = round2(total * fraction);
+        paySeq += 1;
+        const paymentNumber = nextDoc("PAY", paySeq);
+        const paymentDate = bucket % 3 === 0 ? "2026-01-28" : bucket % 3 === 1 ? "2026-02-05" : "2026-02-09";
+        const paymentId = await ctx.db.insert("payments", {
+          schoolId: school._id,
+          paymentNumber,
+          studentId: studentId as Id<"students">,
+          accountId,
+          invoiceId,
+          amount,
+          paymentDate,
+          method: method.name,
+          referenceNumber: `SEED-${paymentNumber}`,
+          receivedById: actor,
+          status: "confirmed",
+          confirmedAt: Date.now(),
+        });
+        txnSeq += 1;
+        const txnId = await ctx.db.insert("ledgerTransactions", {
+          schoolId: school._id,
+          transactionType: "payment",
+          transactionNumber: nextDoc("TXN", txnSeq),
+          date: paymentDate,
+          amount,
+          description: `Payment ${paymentNumber} — ${student.firstName} ${student.lastName}`,
+          studentId: studentId as Id<"students">,
+          accountId,
+          invoiceId,
+          paymentId,
+          createdById: actor,
+          createdAt: Date.now(),
+        });
+        const cashAccountId = cashCodeFor(method.integrationKey);
+        await ctx.db.insert("ledgerEntries", {
+          schoolId: school._id, transactionId: txnId, accountId: cashAccountId, direction: "debit", amount,
+        });
+        await ctx.db.insert("ledgerEntries", {
+          schoolId: school._id, transactionId: txnId, accountId: receivable._id, direction: "credit", amount,
+        });
+        recSeq += 1;
+        const receiptNumber = nextDoc("REC", recSeq);
+        await ctx.db.insert("receipts", {
+          schoolId: school._id, receiptNumber, paymentId, studentId: studentId as Id<"students">,
+          accountId, amount, balanceAfter: round2(total - amount), method: method.name,
+          paymentDate, issuedById: actor, issuedAt: Date.now(),
+        });
+        seededPayments++;
+      }
+
+      /* 7. Refresh invoice statuses from the ledger ------------------- */
+      for (const { invoiceId } of invoiceIds) {
+        const inv = await ctx.db.get(invoiceId as Id<"invoices">);
+        if (!inv || inv.status === "cancelled") continue;
+        const txns = (await ctx.db.query("ledgerTransactions").withIndex("by_invoice", (q) => q.eq("invoiceId", invoiceId as Id<"invoices">)).collect())
+          .filter((t) => t.transactionType === "payment" || t.transactionType === "discount");
+        const settled = round2(txns.reduce((s, t) => s + t.amount, 0));
+        let status = inv.status;
+        if (settled >= inv.totalAmount - 0.001) status = "paid";
+        else if (settled > 0) status = "partially_paid";
+        else if (inv.dueDate < "2026-09-22") status = "overdue";
+        if (status !== inv.status) await ctx.db.patch(inv._id, { status });
+      }
+
+      /* 8. Discounts (pending + applied), scholarships, expenses ------ */
+      const discAll = await ctx.db.query("discounts").withIndex("by_school", (q) => q.eq("schoolId", school._id)).collect();
+      if (discAll.length === 0 && invoiceIds.length > 0) {
+        const discTargets = invoiceIds.slice(0, Math.min(8, invoiceIds.length));
+        let discSeq = 0;
+        for (let i = 0; i < discTargets.length; i++) {
+          const { invoiceId, studentId, accountId, total } = discTargets[i];
+          const student = studentById.get(studentId as Id<"students">);
+          if (!student) continue;
+          discSeq += 1;
+          const discountNumber = nextDoc("DISC", discSeq);
+          const isBursary = i % 2 === 0;
+          const pct = isBursary ? 25 : 10;
+          const computedAmount = round2((total * pct) / 100);
+          const status = i < 5 ? "applied" : "pending";
+          let appliedTransactionId: Id<"ledgerTransactions"> | undefined;
+          if (status === "applied") {
+            txnSeq += 1;
+            const txnId = await ctx.db.insert("ledgerTransactions", {
+              schoolId: school._id,
+              transactionType: "discount",
+              transactionNumber: nextDoc("TXN", txnSeq),
+              date: "2026-02-07",
+              amount: computedAmount,
+              description: `Discount ${discountNumber} (${isBursary ? "Bursary" : "Sibling discount"})`,
+              studentId: studentId as Id<"students">,
+              accountId,
+              invoiceId,
+              createdById: approver,
+              createdAt: Date.now(),
+            });
+            await ctx.db.insert("ledgerEntries", {
+              schoolId: school._id, transactionId: txnId, accountId: discAcc._id, direction: "debit", amount: computedAmount,
+            });
+            await ctx.db.insert("ledgerEntries", {
+              schoolId: school._id, transactionId: txnId, accountId: receivable._id, direction: "credit", amount: computedAmount,
+            });
+            appliedTransactionId = txnId;
+          }
+          await ctx.db.insert("discounts", {
+            schoolId: school._id,
+            discountNumber,
+            studentId: studentId as Id<"students">,
+            accountId,
+            invoiceId,
+            name: isBursary ? "Bursary (need-based)" : "Sibling discount",
+            discountType: "percentage",
+            value: pct,
+            computedAmount: status === "applied" ? computedAmount : 0,
+            reason: isBursary ? "Verified financial hardship" : "Second sibling enrolled",
+            status,
+            requestedById: actor,
+            approvedById: status === "applied" ? approver : undefined,
+            approvedAt: status === "applied" ? Date.now() : undefined,
+            appliedTransactionId,
+          });
+        }
+      }
+
+      const schAll = await ctx.db.query("scholarships").withIndex("by_school", (q) => q.eq("schoolId", school._id)).collect();
+      if (schAll.length === 0 && invoiceIds.length > 2) {
+        for (let i = 0; i < 3; i++) {
+          const t = invoiceIds[i];
+          const student = studentById.get(t.studentId as Id<"students">);
+          if (!student) continue;
+          await ctx.db.insert("scholarships", {
+            schoolId: school._id,
+            studentId: t.studentId as Id<"students">,
+            accountId: t.accountId,
+            name: i === 0 ? "Merit Scholarship 50%" : "Full Bursary",
+            scholarshipType: i === 0 ? "percentage" : "amount",
+            value: i === 0 ? 50 : 15000,
+            reason: i === 0 ? "Top of class 2025" : "Governor's bursary fund",
+            academicYearId: year._id,
+            termId: term1._id,
+            status: "active",
+            approvedById: approver,
+            approvedAt: Date.now(),
+            createdAt: Date.now(),
+          });
+        }
+      }
+
+      const expAll = await ctx.db.query("expenses").withIndex("by_school", (q) => q.eq("schoolId", school._id)).collect();
+      if (expAll.length === 0) {
+        const expenseDefs = [
+          { category: "Utilities", payee: "Kenya Power", amount: 42000, expenseDate: "2026-01-20", status: "paid" as const },
+          { category: "Supplies", payee: "Textbook Centre Ltd", amount: 36500, expenseDate: "2026-01-25", status: "paid" as const },
+          { category: "Food", payee: "Freshmart Suppliers", amount: 58000, expenseDate: "2026-02-02", status: "approved" as const },
+          { category: "Maintenance", payee: "FixIt Services", amount: 12500, expenseDate: "2026-02-08", status: "submitted" as const },
+          { category: "Transport", payee: "Rapid Fuel Station", amount: 21000, expenseDate: "2026-02-10", status: "draft" as const },
+        ];
+        let expSeq = 0;
+        for (const def of expenseDefs) {
+          expSeq += 1;
+          const expenseNumber = nextDoc("EXP", expSeq);
+          const expenseId = await ctx.db.insert("expenses", {
+            schoolId: school._id,
+            expenseNumber,
+            category: def.category,
+            payee: def.payee,
+            amount: def.amount,
+            expenseDate: def.expenseDate,
+            description: `Seeded ${def.category.toLowerCase()} expense`,
+            status: def.status,
+            createdById: actor,
+            submittedAt: def.status !== "draft" ? Date.now() : undefined,
+            approvedById: def.status === "paid" || def.status === "approved" ? approver : undefined,
+            approvedAt: def.status === "paid" || def.status === "approved" ? Date.now() : undefined,
+          });
+          if (def.status === "paid") {
+            txnSeq += 1;
+            const txnId = await ctx.db.insert("ledgerTransactions", {
+              schoolId: school._id,
+              transactionType: "expense",
+              transactionNumber: nextDoc("TXN", txnSeq),
+              date: def.expenseDate,
+              amount: def.amount,
+              description: `Expense ${expenseNumber} — ${def.payee}`,
+              expenseId,
+              createdById: approver,
+              createdAt: Date.now(),
+            });
+            await ctx.db.insert("ledgerEntries", {
+              schoolId: school._id, transactionId: txnId, accountId: expAcc._id, direction: "debit", amount: def.amount,
+            });
+            await ctx.db.insert("ledgerEntries", {
+              schoolId: school._id, transactionId: txnId, accountId: cashAcc._id, direction: "credit", amount: def.amount,
+            });
+            await ctx.db.patch(expenseId, { paidTransactionId: txnId });
+          }
+        }
+      }
+
+      void bursar;
+      void seededPayments;
+    }
+  },
+});
+
+/* ------------------------------------------------------------------ */
 /* Dev-only purge: deletes ALL rows from every table (guarded).        */
 /* ------------------------------------------------------------------ */
 

@@ -15,7 +15,7 @@ import {
   Layers, Grid3X3, BookOpen, UserCog, KeyRound, ScrollText, Settings, School,
   ChevronLeft, LogOut, Loader2, ShieldAlert, ClipboardList,
   CalendarCheck, Clock, FileEdit, ClipboardCheck, SlidersHorizontal, Award,
-  FileSpreadsheet, TrendingUp, Bell,
+  FileSpreadsheet, TrendingUp, Bell, Landmark, Wallet, Receipt, HandCoins, PieChart,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuthActions } from "@convex-dev/auth/react";
@@ -69,6 +69,19 @@ const NAV: NavGroup[] = [
       { to: "/results", label: "Results", icon: Award, permission: "results.view" },
       { to: "/report-cards", label: "Report Cards", icon: FileSpreadsheet, permission: "report_cards.view" },
       { to: "/analytics", label: "Analytics", icon: TrendingUp, permission: "academic_analytics.view" },
+    ],
+  },
+  {
+    heading: "Finance",
+    items: [
+      { to: "/finance", label: "Finance Dashboard", icon: Landmark, permission: "finance.view" },
+      { to: "/finance/fees", label: "Fees & Billing", icon: Wallet, permission: "finance.view" },
+      { to: "/finance/invoices", label: "Invoices", icon: FileSpreadsheet, permission: "billing.view" },
+      { to: "/finance/payments", label: "Payments & Receipts", icon: Receipt, permission: "receipts.view" },
+      { to: "/finance/accounts", label: "Student Accounts", icon: PieChart, permission: "billing.view" },
+      { to: "/finance/discounts", label: "Discounts & Scholarships", icon: HandCoins, permission: "billing.view" },
+      { to: "/finance/expenses", label: "Expenses", icon: ClipboardList, permission: "finance.view" },
+      { to: "/finance/reports", label: "Financial Reports", icon: TrendingUp, permission: "financial_reports.view" },
     ],
   },
   {

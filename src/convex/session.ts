@@ -170,7 +170,23 @@ type SchoolScopedTable =
   | "gradingSchemes"
   | "gradeBands"
   | "subjectResults"
-  | "reportCards";
+  | "reportCards"
+  | "feeCategories"
+  | "paymentMethods"
+  | "ledgerAccounts"
+  | "feeStructures"
+  | "feeItems"
+  | "studentAccounts"
+  | "invoices"
+  | "invoiceItems"
+  | "ledgerTransactions"
+  | "ledgerEntries"
+  | "payments"
+  | "receipts"
+  | "discounts"
+  | "scholarships"
+  | "refunds"
+  | "expenses";
 
 /**
  * Fetch a school-scoped record by ID and verify it belongs to the caller's

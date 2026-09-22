@@ -92,6 +92,21 @@ export const PERMISSIONS = [
   "report_cards.generate",
   "report_cards.publish",
   "academic_analytics.view",
+  // phase 3 — finance
+  "finance.view",
+  "finance.manage",
+  "fees.manage",
+  "billing.view",
+  "billing.create",
+  "payments.create",
+  "payments.approve",
+  "receipts.view",
+  "receipts.print",
+  "discounts.manage",
+  "scholarships.manage",
+  "expenses.create",
+  "expenses.approve",
+  "financial_reports.view",
   // platform-scoped (super admin only)
   "platform.dashboard.view",
   "platform.schools.view",
@@ -142,6 +157,14 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "results.view", "results.review", "results.approve", "results.publish",
     "report_cards.view", "report_cards.generate", "report_cards.publish",
     "academic_analytics.view",
+    // Phase 3: finance (school admin manages the finance module)
+    "finance.view", "finance.manage", "fees.manage",
+    "billing.view", "billing.create",
+    "payments.create", "payments.approve",
+    "receipts.view", "receipts.print",
+    "discounts.manage", "scholarships.manage",
+    "expenses.create", "expenses.approve",
+    "financial_reports.view",
   ],
   principal: [
     "dashboard.view",
@@ -175,6 +198,9 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "results.view", "results.review", "results.approve", "results.publish",
     "report_cards.view", "report_cards.generate", "report_cards.publish",
     "academic_analytics.view",
+    // Phase 3: finance summaries + approval authorities (no billing/cashiering)
+    "finance.view", "billing.view", "receipts.view", "financial_reports.view",
+    "discounts.manage", "scholarships.manage", "expenses.approve",
   ],
   teacher: [
     "dashboard.view",
@@ -203,6 +229,14 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "staff.view",
     "academics.view",
     "settings.view",
+    // Phase 3: finance — the accountant/bursar is the primary finance user
+    "finance.view", "fees.manage",
+    "billing.view", "billing.create",
+    "payments.create", "payments.approve",
+    "receipts.view", "receipts.print",
+    "discounts.manage", "scholarships.manage",
+    "expenses.create",
+    "financial_reports.view",
   ],
   parent: ["dashboard.view", "school.view"],
   student: ["dashboard.view", "school.view"],
@@ -264,6 +298,32 @@ export const RESULT_SUBMISSION_STATUS = [
   "draft", "submitted", "approved", "published", "locked", "reopened",
 ] as const;
 export const REPORT_CARD_STATUS = ["draft", "generated", "published"] as const;
+
+/* Phase 3 enums — finance */
+export const FEE_CATEGORIES = [
+  "Tuition", "Boarding", "Transport", "Meals", "Activity", "Examination", "Uniform", "Other",
+] as const;
+export const INVOICE_STATUSES = [
+  "draft", "issued", "partially_paid", "paid", "overdue", "cancelled",
+] as const;
+export const LEDGER_ACCOUNT_TYPES = ["asset", "liability", "equity", "revenue", "expense"] as const;
+export const LEDGER_ENTRY_DIRECTIONS = ["debit", "credit"] as const;
+export const LEDGER_TRANSACTION_TYPES = [
+  "invoice", "payment", "discount", "refund", "expense", "adjustment",
+] as const;
+export const PAYMENT_METHODS = [
+  "cash", "bank_transfer", "mobile_money", "card", "cheque",
+] as const;
+export const PAYMENT_STATUSES = ["pending", "confirmed", "reversed"] as const;
+export const DISCOUNT_TYPES = ["percentage", "amount"] as const;
+export const DISCOUNT_STATUSES = ["pending", "approved", "rejected", "applied", "cancelled"] as const;
+export const SCHOLARSHIP_TYPES = ["percentage", "amount"] as const;
+export const SCHOLARSHIP_STATUSES = ["active", "ended", "cancelled"] as const;
+export const REFUND_STATUSES = ["requested", "approved", "paid", "rejected", "cancelled"] as const;
+export const EXPENSE_STATUSES = ["draft", "submitted", "approved", "rejected", "paid"] as const;
+export const STATEMENT_ENTRY_TYPES = [
+  "invoice", "payment", "discount", "refund", "adjustment",
+] as const;
 
 /* ------------------------------------------------------------------ */
 /* Schema                                                              */
@@ -817,6 +877,284 @@ const schema = defineSchema(
     })
       .index("by_user", ["userId"])
       .index("by_school", ["schoolId"]),
+
+    /* ---------------- Phase 3: Finance foundation ---------------- */
+
+    /** School-configurable fee categories (no hardcoded categories). */
+    feeCategories: defineTable({
+      schoolId: v.id("schools"),
+      name: v.string(),
+      status: v.string(), // ENTITY_STATUS
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_school_name", ["schoolId", "name"]),
+
+    /** Configurable payment methods — future gateways attach here by key. */
+    paymentMethods: defineTable({
+      schoolId: v.id("schools"),
+      name: v.string(),
+      /** Stable key for future integrations (mpesa, stripe, bank_api, …). */
+      integrationKey: v.optional(v.string()),
+      status: v.string(), // ENTITY_STATUS
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_school_name", ["schoolId", "name"]),
+
+    /** Chart of accounts foundation. */
+    ledgerAccounts: defineTable({
+      schoolId: v.id("schools"),
+      code: v.string(),
+      name: v.string(),
+      accountType: v.string(), // LEDGER_ACCOUNT_TYPES
+      status: v.string(), // ENTITY_STATUS
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_school_code", ["schoolId", "code"]),
+
+    /**
+     * Fee structure: a named group of fee items for a term scoped by class.
+     * `applicableGradeLevelIds` empty = all classes.
+     */
+    feeStructures: defineTable({
+      schoolId: v.id("schools"),
+      academicYearId: v.id("academicYears"),
+      termId: v.id("terms"),
+      name: v.string(),
+      applicableGradeLevelIds: v.array(v.id("gradeLevels")),
+      status: v.string(), // ENTITY_STATUS
+      createdBy: v.optional(v.id("users")),
+      updatedAt: v.optional(v.number()),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_term", ["termId"])
+      .index("by_school_year", ["schoolId", "academicYearId"]),
+
+    feeItems: defineTable({
+      schoolId: v.id("schools"),
+      feeStructureId: v.id("feeStructures"),
+      name: v.string(),
+      category: v.string(), // free-form; seeded defaults, school-editable
+      amount: v.number(), // major units (whole currency)
+      mandatory: v.boolean(),
+      status: v.string(), // ENTITY_STATUS
+    })
+      .index("by_structure", ["feeStructureId"])
+      .index("by_school", ["schoolId"]),
+
+    /** One per student per school. Balance is always derived from the ledger. */
+    studentAccounts: defineTable({
+      schoolId: v.id("schools"),
+      studentId: v.id("students"),
+      /** Manual snapshot ONLY for reporting/sorting convenience — never authoritative. */
+      openingBalance: v.number(),
+      status: v.string(), // ENTITY_STATUS
+      updatedAt: v.optional(v.number()),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_student", ["studentId"])
+      .index("by_school_student", ["schoolId", "studentId"]),
+
+    invoices: defineTable({
+      schoolId: v.id("schools"),
+      invoiceNumber: v.string(),
+      studentId: v.id("students"),
+      accountId: v.id("studentAccounts"),
+      academicYearId: v.id("academicYears"),
+      termId: v.id("terms"),
+      issueDate: v.string(),
+      dueDate: v.string(),
+      totalAmount: v.number(),
+      status: v.string(), // INVOICE_STATUSES
+      notes: v.optional(v.string()),
+      createdById: v.id("users"),
+      issuedAt: v.optional(v.number()),
+      cancelledAt: v.optional(v.number()),
+      cancelReason: v.optional(v.string()),
+      updatedAt: v.optional(v.number()),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_school_number", ["schoolId", "invoiceNumber"])
+      .index("by_student", ["studentId"])
+      .index("by_term", ["termId"])
+      .index("by_school_status", ["schoolId", "status"]),
+
+    invoiceItems: defineTable({
+      schoolId: v.id("schools"),
+      invoiceId: v.id("invoices"),
+      description: v.string(),
+      category: v.string(),
+      quantity: v.number(),
+      amount: v.number(), // unit amount
+      /** Immutable snapshot of the fee item name at billing time (§28). */
+      sourceFeeItemId: v.optional(v.id("feeItems")),
+    })
+      .index("by_invoice", ["invoiceId"])
+      .index("by_school", ["schoolId"]),
+
+    /**
+     * Double-entry-inspired ledger: every financial event posts balanced
+     * debit/credit entries to accounts (student receivable, revenue, cash…).
+     * Entries are immutable — corrections post new reversing entries.
+     */
+    ledgerTransactions: defineTable({
+      schoolId: v.id("schools"),
+      transactionType: v.string(), // LEDGER_TRANSACTION_TYPES
+      transactionNumber: v.string(), // human reference e.g. PAY-2026-00012
+      date: v.string(), // YYYY-MM-DD
+      amount: v.number(), // total transaction value (positive)
+      description: v.optional(v.string()),
+      studentId: v.optional(v.id("students")),
+      accountId: v.optional(v.id("studentAccounts")),
+      invoiceId: v.optional(v.id("invoices")),
+      paymentId: v.optional(v.id("payments")),
+      discountId: v.optional(v.id("discounts")),
+      refundId: v.optional(v.id("refunds")),
+      expenseId: v.optional(v.id("expenses")),
+      createdById: v.id("users"),
+      createdAt: v.number(),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_student", ["studentId"])
+      .index("by_account", ["accountId"])
+      .index("by_school_date", ["schoolId", "date"])
+      .index("by_invoice", ["invoiceId"]),
+
+    ledgerEntries: defineTable({
+      schoolId: v.id("schools"),
+      transactionId: v.id("ledgerTransactions"),
+      accountId: v.id("ledgerAccounts"),
+      direction: v.string(), // LEDGER_ENTRY_DIRECTIONS
+      amount: v.number(),
+    })
+      .index("by_transaction", ["transactionId"])
+      .index("by_account", ["accountId"])
+      .index("by_school", ["schoolId"]),
+
+    payments: defineTable({
+      schoolId: v.id("schools"),
+      paymentNumber: v.string(),
+      studentId: v.id("students"),
+      accountId: v.id("studentAccounts"),
+      invoiceId: v.optional(v.id("invoices")),
+      amount: v.number(),
+      paymentDate: v.string(),
+      method: v.string(), // PAYMENT_METHODS (name of configured method row)
+      referenceNumber: v.optional(v.string()),
+      notes: v.optional(v.string()),
+      receivedById: v.id("users"),
+      status: v.string(), // PAYMENT_STATUSES
+      confirmedAt: v.optional(v.number()),
+      reversedAt: v.optional(v.number()),
+      reversedById: v.optional(v.id("users")),
+      reverseReason: v.optional(v.string()),
+      updatedAt: v.optional(v.number()),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_school_number", ["schoolId", "paymentNumber"])
+      .index("by_student", ["studentId"])
+      .index("by_invoice", ["invoiceId"])
+      .index("by_school_date", ["schoolId", "paymentDate"]),
+
+    receipts: defineTable({
+      schoolId: v.id("schools"),
+      receiptNumber: v.string(),
+      paymentId: v.id("payments"),
+      studentId: v.id("students"),
+      accountId: v.id("studentAccounts"),
+      amount: v.number(),
+      balanceAfter: v.number(),
+      method: v.string(),
+      paymentDate: v.string(),
+      issuedById: v.id("users"),
+      issuedAt: v.number(),
+      voidedAt: v.optional(v.number()),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_school_number", ["schoolId", "receiptNumber"])
+      .index("by_payment", ["paymentId"])
+      .index("by_student", ["studentId"]),
+
+    discounts: defineTable({
+      schoolId: v.id("schools"),
+      discountNumber: v.string(),
+      studentId: v.id("students"),
+      accountId: v.id("studentAccounts"),
+      invoiceId: v.optional(v.id("invoices")),
+      name: v.string(), // "Sibling discount", "Staff child", custom…
+      discountType: v.string(), // DISCOUNT_TYPES
+      value: v.number(), // percent (0-100) or amount
+      computedAmount: v.number(), // resolved currency amount at approval time
+      reason: v.optional(v.string()),
+      status: v.string(), // DISCOUNT_STATUSES
+      requestedById: v.id("users"),
+      approvedById: v.optional(v.id("users")),
+      approvedAt: v.optional(v.number()),
+      appliedTransactionId: v.optional(v.id("ledgerTransactions")),
+      updatedAt: v.optional(v.number()),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_student", ["studentId"])
+      .index("by_invoice", ["invoiceId"]),
+
+    scholarships: defineTable({
+      schoolId: v.id("schools"),
+      studentId: v.id("students"),
+      accountId: v.id("studentAccounts"),
+      name: v.string(),
+      scholarshipType: v.string(), // SCHOLARSHIP_TYPES
+      value: v.number(),
+      reason: v.optional(v.string()),
+      academicYearId: v.id("academicYears"),
+      termId: v.optional(v.id("terms")),
+      status: v.string(), // SCHOLARSHIP_STATUSES
+      approvedById: v.optional(v.id("users")),
+      approvedAt: v.optional(v.number()),
+      createdAt: v.number(),
+      updatedAt: v.optional(v.number()),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_student", ["studentId"]),
+
+    refunds: defineTable({
+      schoolId: v.id("schools"),
+      refundNumber: v.string(),
+      studentId: v.id("students"),
+      accountId: v.id("studentAccounts"),
+      paymentId: v.optional(v.id("payments")),
+      amount: v.number(),
+      reason: v.optional(v.string()),
+      status: v.string(), // REFUND_STATUSES
+      requestedById: v.id("users"),
+      approvedById: v.optional(v.id("users")),
+      approvedAt: v.optional(v.number()),
+      paidTransactionId: v.optional(v.id("ledgerTransactions")),
+      createdAt: v.number(),
+      updatedAt: v.optional(v.number()),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_student", ["studentId"]),
+
+    expenses: defineTable({
+      schoolId: v.id("schools"),
+      expenseNumber: v.string(),
+      category: v.string(),
+      payee: v.string(),
+      amount: v.number(),
+      expenseDate: v.string(),
+      description: v.optional(v.string()),
+      attachmentId: v.optional(v.id("files")),
+      status: v.string(), // EXPENSE_STATUSES
+      createdById: v.id("users"),
+      submittedAt: v.optional(v.number()),
+      approvedById: v.optional(v.id("users")),
+      approvedAt: v.optional(v.number()),
+      rejectionReason: v.optional(v.string()),
+      paidTransactionId: v.optional(v.id("ledgerTransactions")),
+      updatedAt: v.optional(v.number()),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_school_status", ["schoolId", "status"])
+      .index("by_school_date", ["schoolId", "expenseDate"]),
 
     /* ---------------- Platform / governance ---------------- */
 
