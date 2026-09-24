@@ -4,6 +4,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { getSession, requirePermission, getSchoolRecord } from "./session";
 import { recordAudit } from "./audit";
 import { CONTRACT_STATUSES } from "./schema";
+import { can } from "./access";
 
 /* ================================================================== */
 /* Departments                                                         */
@@ -643,8 +644,9 @@ export const requestLeave = mutation({
 });
 
 async function sessionHasPermission(ctx: unknown, session: { role: unknown }, permission: string): Promise<boolean> {
-  // Local helper to avoid circular imports; mirrors access.can for school roles.
-  const { can } = await import("./access");
+  // Static import of access.can (no runtime dynamic imports on Convex);
+  // mirrors access.can for school roles.
+  void ctx;
   return can(session.role as never, permission as never);
 }
 

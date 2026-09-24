@@ -217,6 +217,24 @@ export const seedOperations = internalMutation({
         }
       }
 
+      /* Self-heal: link active contracts to a salary structure — payroll can
+         only pay contracts carrying one. Teaching job titles get the teaching
+         scale, everyone else the support scale. */
+      if (teacherStructureId || supportStructureId) {
+        for (const s of staff) {
+          const employeeId = employeesByStaffId.get(s._id);
+          if (!employeeId) continue;
+          const active = await ctx.db
+            .query("contracts")
+            .withIndex("by_employee", (q) => q.eq("employeeId", employeeId))
+            .collect()
+            .then((cs) => cs.find((c) => c.status === "active"));
+          if (!active || active.salaryStructureId) continue;
+          const structureId = s.jobTitle === "Teacher" ? teacherStructureId : supportStructureId;
+          if (structureId) await ctx.db.patch(active._id, { salaryStructureId: structureId, updatedAt: Date.now() });
+        }
+      }
+
       /* ---------- Payroll: a paid September run with payslips ---------- */
       const existingRuns = await ctx.db
         .query("payrollRuns")
