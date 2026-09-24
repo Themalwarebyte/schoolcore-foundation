@@ -388,7 +388,10 @@ export const advancePayrollRun = mutation({
 export const myPayslips = query({
   args: {},
   handler: async (ctx) => {
-    const session = await requirePermission(ctx, "payroll.view");
+    // Self-service: any signed-in school member may look up their OWN payslips
+    // (the query only ever returns slips tied to the caller's staff record;
+    // payroll administration still requires payroll.view/payroll.manage).
+    const session = await getSession(ctx);
     const schoolId = session.schoolId as Id<"schools">;
     const ownStaff = await ctx.db
       .query("staff")
