@@ -3,6 +3,7 @@ import { mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { requirePermission, getSchoolRecord } from "./session";
 import { recordAudit } from "./audit";
+import { postLedgerTransaction, ACC } from "./finance";
 
 /* ================================================================== */
 /* Suppliers                                                           */
@@ -267,7 +268,6 @@ export const receivePurchaseOrder = mutation({
     const o = await getSchoolRecord(ctx, schoolId, "purchaseOrders", orderId);
     if (o.status === "received") throw new ConvexError("This order is already received.");
     if (o.status === "cancelled") throw new ConvexError("Cancelled orders cannot be received.");
-    const { postLedgerTransaction, ACC } = await import("./finance");
     const today = new Date().toISOString().slice(0, 10);
     const txnId = await postLedgerTransaction(ctx, schoolId, session.userId, {
       transactionType: "expense",
