@@ -1312,3 +1312,181 @@ export const purgeAll = internalMutation({
     }
   },
 });
+
+export const listActiveStudents = internalQuery({
+  args: { schoolId: v.id("schools"), limit: v.number() },
+  handler: async (ctx, { schoolId, limit }) => {
+    const students = await ctx.db
+      .query("students")
+      .withIndex("by_school_status", (q) => q.eq("schoolId", schoolId).eq("studentStatus", "active"))
+      .collect();
+    return students.slice(0, limit).map((s) => ({ _id: s._id, firstName: s.firstName, lastName: s.lastName }));
+  },
+});
+
+/* ================================================================== */
+/* Phase 4: portal demo-data seeding (idempotent)                       */
+/* ================================================================== */
+
+export const seedPortalDemo = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const school = (await ctx.db.query("schools").collect()).find((s) => s.code === "GRN-001");
+    if (!school) return { links: 0, announcements: 0 };
+    const schoolId = school._id;
+    let links = 0;
+
+    // 1. One-child parent: link guardian of the first active student.
+    const students = await ctx.db
+      .query("students")
+      .withIndex("by_school_status", (q) => q.eq("schoolId", schoolId).eq("studentStatus", "active"))
+      .collect();
+    const first = students[0];
+    const second = students[1];
+    if (first) {
+      const existingLinks = await ctx.db
+        .query("guardianStudents")
+        .withIndex("by_student", (q) => q.eq("studentId", first._id))
+        .collect();
+      if (existingLinks.length > 0) {
+        const guardianId = existingLinks[0].guardianId;
+        const hasPortal = await ctx.db
+          .query("guardianPortalLinks")
+          .withIndex("by_guardian", (q) => q.eq("guardianId", guardianId))
+          .collect()
+          .then((ls) => ls.some((l) => l.status === "active"));
+        if (!hasPortal) {
+          const userId = await ctx.db
+            .query("users")
+            .withIndex("email", (q) => q.eq("email", "parent.wanjiku@greenfield.ac.ke"))
+            .first();
+          if (userId) {
+            await ctx.db.insert("guardianPortalLinks", {
+              schoolId,
+              guardianId,
+              userId: userId._id,
+              invitedById: userId._id,
+              invitedAt: Date.now(),
+              status: "active",
+            });
+            links++;
+          }
+        }
+      }
+    }
+
+    // 2. Multi-child parent: reuse a guardian linked to two sibling students.
+    if (second) {
+      const firstLinks = first
+        ? await ctx.db
+            .query("guardianStudents")
+            .withIndex("by_student", (q) => q.eq("studentId", first._id))
+            .collect()
+        : [];
+      if (firstLinks.length > 0) {
+        const guardianId = firstLinks[0].guardianId;
+        const secondLinks = await ctx.db
+          .query("guardianStudents")
+          .withIndex("by_guardian_student", (q) => q.eq("guardianId", guardianId).eq("studentId", second._id))
+          .collect();
+        if (secondLinks.length === 0) {
+          await ctx.db.insert("guardianStudents", {
+            schoolId,
+            guardianId,
+            studentId: second._id,
+            relationship: "guardian",
+            isPrimary: false,
+            isEmergencyContact: true,
+            receivesAcademicCommunication: true,
+            receivesFinancialCommunication: true,
+          });
+          links++;
+        }
+      }
+    }
+
+    // 3. Student portal account for the first student.
+    if (first) {
+      const hasStudentPortal = await ctx.db
+        .query("studentPortalLinks")
+        .withIndex("by_student", (q) => q.eq("studentId", first._id))
+        .collect()
+        .then((ls) => ls.some((l) => l.status === "active"));
+      if (!hasStudentPortal) {
+        const userId = await ctx.db
+          .query("users")
+          .withIndex("email", (q) => q.eq("email", "student.demo@greenfield.ac.ke"))
+          .first();
+        if (userId) {
+          await ctx.db.insert("studentPortalLinks", {
+            schoolId,
+            studentId: first._id,
+            userId: userId._id,
+            invitedById: userId._id,
+            invitedAt: Date.now(),
+            status: "active",
+          });
+          links++;
+        }
+      }
+    }
+
+    // 4. Announcements (idempotent by title).
+    const admin = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", "admin@greenfield.ac.ke"))
+      .first();
+    if (!admin) return { links, announcements: 0 };
+    let announcements = 0;
+    const drafts = [
+      {
+        title: "Term 2 Fee Payment Reminder",
+        message:
+          "Dear parents, Term 2 fees are due by 15th of next month. Payments can be made via bank transfer or mobile money. Kindly reference the student admission number.",
+        audience: "parents",
+      },
+      {
+        title: "Sports Day — Friday",
+        message:
+          "Our annual Sports Day takes place this Friday from 8:00 AM. All students should come in full sports uniform. Parents are welcome to attend.",
+        audience: "all",
+      },
+      {
+        title: "Staff Meeting — Monday 4 PM",
+        message: "All teaching staff are required to attend the end-of-month staff meeting in the staff room.",
+        audience: "teachers",
+      },
+      {
+        title: "Grade 7 Science Trip",
+        message:
+          "Grade 7 students will visit the National Museum on Thursday. Permission slips were sent home and should be returned by Wednesday.",
+        audience: "grade",
+        gradeName: "Grade 7",
+      },
+    ];
+    const grade7 = (await ctx.db.query("gradeLevels").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).collect())
+      .find((g) => g.name === "Grade 7");
+    for (const d of drafts) {
+      const existing = await ctx.db
+        .query("announcements")
+        .withIndex("by_school", (q) => q.eq("schoolId", schoolId))
+        .collect()
+        .then((as) => as.find((a) => a.title === d.title));
+      if (existing) continue;
+      await ctx.db.insert("announcements", {
+        schoolId,
+        title: d.title,
+        message: d.message,
+        audience: d.audience,
+        gradeLevelId: "gradeName" in d && d.gradeName === "Grade 7" && grade7 ? grade7._id : undefined,
+        status: "published",
+        publishDate: new Date().toISOString().slice(0, 10),
+        createdById: admin._id,
+        publishedAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+      announcements++;
+    }
+    return { links, announcements };
+  },
+});

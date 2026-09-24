@@ -4,6 +4,7 @@ import { mutation, query, type MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { requirePermission, getSchoolRecord } from "./session";
 import { recordAudit } from "./audit";
+import { notifyStudentCircle } from "./notify";
 import { gradeFor, overallAverage, competitionRanks } from "./engines/results";
 
 type MutationCtxLike = MutationCtx;
@@ -269,6 +270,15 @@ export const publish = mutation({
     const now = Date.now();
     for (const c of eligible) {
       await ctx.db.patch(c._id, { status: "published", publishedAt: now, updatedAt: now });
+    }
+    // Phase 4: notify each affected student's portal circle.
+    for (const c of eligible) {
+      await notifyStudentCircle(ctx, schoolId, c.studentId, {
+        type: "report_card",
+        title: "Report card published",
+        body: "A new report card is available. Open the portal to view or download it.",
+        link: "/portal/report-cards",
+      });
     }
     await recordAudit(ctx, {
       userId: session.userId,

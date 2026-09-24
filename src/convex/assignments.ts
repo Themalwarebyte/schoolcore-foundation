@@ -3,6 +3,7 @@ import { mutation, query, type MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { requirePermission, getSchoolRecord } from "./session";
 import { recordAudit } from "./audit";
+import { notifyStudentCircle } from "./notify";
 import { ASSIGNMENT_STATUS } from "./schema";
 import { validDate } from "./attendance";
 
@@ -169,6 +170,19 @@ export const publish = mutation({
       publishedAt: a.publishedAt ?? Date.now(),
       updatedAt: Date.now(),
     });
+    // Phase 4: notify recipients' portal circles (students + parents).
+    const recipients = existing.length > 0 ? existing : await ctx.db
+      .query("assignmentRecipients")
+      .withIndex("by_assignment", (q) => q.eq("assignmentId", assignmentId))
+      .collect();
+    for (const r of recipients) {
+      await notifyStudentCircle(ctx, schoolId, r.studentId, {
+        type: "assignment",
+        title: `New assignment: ${a.title}`,
+        body: "A new assignment has been published. Check the portal for details.",
+        link: "/portal/assignments",
+      });
+    }
     await recordAudit(ctx, {
       userId: session.userId,
       schoolId,

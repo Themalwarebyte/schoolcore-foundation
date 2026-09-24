@@ -107,6 +107,16 @@ export const PERMISSIONS = [
   "expenses.create",
   "expenses.approve",
   "financial_reports.view",
+  // phase 4 — portals & communication
+  "portal.parent",
+  "portal.student",
+  "announcements.view",
+  "announcements.create",
+  "announcements.publish",
+  "announcements.manage",
+  "notifications.view",
+  "profile.view",
+  "profile.update",
   // platform-scoped (super admin only)
   "platform.dashboard.view",
   "platform.schools.view",
@@ -165,6 +175,9 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "discounts.manage", "scholarships.manage",
     "expenses.create", "expenses.approve",
     "financial_reports.view",
+    // Phase 4: portals & communication (admin provisions portal accounts)
+    "announcements.view", "announcements.create", "announcements.publish", "announcements.manage",
+    "notifications.view", "profile.view", "profile.update",
   ],
   principal: [
     "dashboard.view",
@@ -201,6 +214,9 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     // Phase 3: finance summaries + approval authorities (no billing/cashiering)
     "finance.view", "billing.view", "receipts.view", "financial_reports.view",
     "discounts.manage", "scholarships.manage", "expenses.approve",
+    // Phase 4: communication
+    "announcements.view", "announcements.create", "announcements.publish",
+    "notifications.view", "profile.view",
   ],
   teacher: [
     "dashboard.view",
@@ -238,8 +254,21 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "expenses.create",
     "financial_reports.view",
   ],
-  parent: ["dashboard.view", "school.view"],
-  student: ["dashboard.view", "school.view"],
+  parent: [
+    "dashboard.view", "school.view",
+    // Phase 4: parent portal — access ONLY via portal.* scoped queries that
+    // verify the child link server-side. Deliberately NO generic
+    // attendance/results/finance permissions: those endpoints are
+    // school-wide and would leak other students' data within the school.
+    "portal.parent", "notifications.view", "profile.view", "profile.update",
+    "announcements.view",
+  ],
+  student: [
+    "dashboard.view", "school.view",
+    // Phase 4: student portal — own records only, via portal.* queries.
+    "portal.student", "notifications.view", "profile.view",
+    "announcements.view",
+  ],
 };
 
 export function rolePermissions(role: Role): readonly Permission[] {
@@ -321,6 +350,11 @@ export const SCHOLARSHIP_TYPES = ["percentage", "amount"] as const;
 export const SCHOLARSHIP_STATUSES = ["active", "ended", "cancelled"] as const;
 export const REFUND_STATUSES = ["requested", "approved", "paid", "rejected", "cancelled"] as const;
 export const EXPENSE_STATUSES = ["draft", "submitted", "approved", "rejected", "paid"] as const;
+
+/* Phase 4: portals & communication */
+export const ANNOUNCEMENT_AUDIENCES = ["all", "parents", "students", "teachers", "class", "grade"] as const;
+export const ANNOUNCEMENT_STATUSES = ["draft", "published", "archived"] as const;
+export const PORTAL_LINK_STATUSES = ["active", "revoked"] as const;
 export const STATEMENT_ENTRY_TYPES = [
   "invoice", "payment", "discount", "refund", "adjustment",
 ] as const;
@@ -875,6 +909,59 @@ const schema = defineSchema(
       readAt: v.optional(v.number()),
       createdAt: v.number(),
     })
+      .index("by_user", ["userId"])
+      .index("by_school", ["schoolId"]),
+
+    /* ---------------- Phase 4: Portals & communication ---------------- */
+
+    /**
+     * School announcements. Audience is one of ANNOUNCEMENT_AUDIENCES;
+     * class/grade audiences store the target id. Portals and staff filter
+     * by audience — records themselves are never duplicated per recipient.
+     */
+    announcements: defineTable({
+      schoolId: v.id("schools"),
+      title: v.string(),
+      message: v.string(),
+      audience: v.string(), // ANNOUNCEMENT_AUDIENCES
+      classSectionId: v.optional(v.id("classSections")),
+      gradeLevelId: v.optional(v.id("gradeLevels")),
+      status: v.string(), // ANNOUNCEMENT_STATUSES
+      publishDate: v.optional(v.string()),
+      expiryDate: v.optional(v.string()),
+      createdById: v.id("users"),
+      publishedAt: v.optional(v.number()),
+      archivedAt: v.optional(v.number()),
+      updatedAt: v.optional(v.number()),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_school_status", ["schoolId", "status"])
+      .index("by_class", ["classSectionId"])
+      .index("by_grade", ["gradeLevelId"]),
+
+    /** Controlled link: guardian record ↔ user account (parent role). */
+    guardianPortalLinks: defineTable({
+      schoolId: v.id("schools"),
+      guardianId: v.id("guardians"),
+      userId: v.id("users"),
+      invitedById: v.id("users"),
+      invitedAt: v.number(),
+      status: v.string(), // PORTAL_LINK_STATUSES
+    })
+      .index("by_guardian", ["guardianId"])
+      .index("by_user", ["userId"])
+      .index("by_school", ["schoolId"]),
+
+    /** Controlled link: student record ↔ user account (student role). */
+    studentPortalLinks: defineTable({
+      schoolId: v.id("schools"),
+      studentId: v.id("students"),
+      userId: v.id("users"),
+      invitedById: v.id("users"),
+      invitedAt: v.number(),
+      status: v.string(), // PORTAL_LINK_STATUSES
+    })
+      .index("by_student", ["studentId"])
       .index("by_user", ["userId"])
       .index("by_school", ["schoolId"]),
 

@@ -90,6 +90,16 @@ export const seedAll = action({
       await ctx.runMutation(internal.seedHelpers.seedAcademicOps, {});
       // Fill any Phase 3 finance gaps (idempotent).
       await ctx.runMutation(internal.seedHelpers.seedFinance, {});
+      // Phase 4 portal demo data (announcements; links are ensured below).
+      await ctx.runMutation(internal.seedHelpers.seedPortalDemo, {});
+      // Portal demo accounts (idempotent through ensureDemoAccountAccess).
+      for (const acct of [
+        { email: "parent.wanjiku@greenfield.ac.ke", password: "Parent#2026", role: "parent", schoolId: gfId ?? undefined },
+        { email: "student.demo@greenfield.ac.ke", password: "Student#2026", role: "student", schoolId: gfId ?? undefined },
+      ]) {
+        await ctx.runAction(internal.accounts.ensureDemoAccountAccess, acct);
+      }
+      await ctx.runMutation(internal.seedHelpers.seedPortalDemo, {});
       return { skipped: true as const, message: "Seed data already present. Bootstrap admin + demo accounts ensured." };
     }
     const superAdminId = await ctx.runQuery(internal.seedHelpers.findUserByEmail, {
@@ -431,6 +441,49 @@ export const seedAll = action({
     await ctx.runMutation(internal.seedHelpers.seedAcademicOps, {});
     // Phase 3 finance config + demo data (idempotent).
     await ctx.runMutation(internal.seedHelpers.seedFinance, {});
+
+    // Phase 4 portal demo accounts + links + announcements.
+    const parentUserId = await ctx.runAction(internal.accounts.ensureDemoAccountAccess, {
+      email: "parent.wanjiku@greenfield.ac.ke", password: "Parent#2026", role: "parent", schoolId: greenfieldId,
+    });
+    const studentUserId = await ctx.runAction(internal.accounts.ensureDemoAccountAccess, {
+      email: "student.demo@greenfield.ac.ke", password: "Student#2026", role: "student", schoolId: greenfieldId,
+    });
+    // Link the parent to the first two active students (one/multi child demo).
+    const portalStudents = await ctx.runQuery(internal.seedHelpers.listActiveStudents, { schoolId: greenfieldId, limit: 2 });
+    if (portalStudents[0]) {
+      const gLinks = await ctx.runQuery(internal.seedHelpers.getGuardianLinks, { studentId: portalStudents[0]._id });
+      if (gLinks[0]) {
+        await ctx.runMutation(internal.announcements.seedLinkInternal, {
+          guardianId: gLinks[0].guardianId, userId: parentUserId as Id<"users">, schoolId: greenfieldId,
+        });
+      }
+      if (portalStudents[1]) {
+        await ctx.runMutation(internal.seedHelpers.linkGuardian, {
+          schoolId: greenfieldId,
+          guardianId: gLinks[0].guardianId,
+          studentId: portalStudents[1]._id,
+          isPrimary: false,
+          isEmergencyContact: true,
+          relationship: "guardian",
+        });
+      }
+    }
+    if (portalStudents[0]) {
+      await ctx.runMutation(internal.announcements.seedStudentLinkInternal, {
+        studentId: portalStudents[0]._id, userId: studentUserId as Id<"users">, schoolId: greenfieldId,
+      });
+    }
+    for (const a of [
+      { title: "Term 2 Fee Payment Reminder", message: "Dear parents, Term 2 fees are due by the 15th. Payments via bank transfer or mobile money — reference the admission number.", audience: "parents" },
+      { title: "Sports Day — Friday", message: "Annual Sports Day this Friday from 8:00 AM. Full sports uniform. Parents welcome.", audience: "all" },
+      { title: "Staff Meeting — Monday 4 PM", message: "All teaching staff attend the end-of-month meeting in the staff room.", audience: "teachers" },
+    ]) {
+      await ctx.runMutation(internal.announcements.seedAnnouncementInternal, {
+        schoolId: greenfieldId, createdById: adminId as Id<"users">, ...a,
+      });
+    }
+    await ctx.runMutation(internal.seedHelpers.seedPortalDemo, {});
 
     return {
       skipped: false as const,
