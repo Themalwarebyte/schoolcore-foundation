@@ -206,9 +206,17 @@ async function fanOutAnnouncement(
     await notifySchoolMembers(ctx, schoolId, { ...payload, link: "/announcements" }, ["teacher"]);
     return;
   }
-  // "all", "parents", "students": school-wide fan-out is the base; role
-  // filtering happens on read for portal views. Parents/students without
-  // accounts simply have no membership row.
+  // "all", "parents", "students": school-wide fan-out scoped to the target
+  // audience. Parents/students without accounts simply have no membership
+  // row; staff can still read announcements in the announcements feed.
+  if (a.audience === "parents") {
+    await notifySchoolMembers(ctx, schoolId, { ...payload, link: "/portal/announcements" }, ["parent"]);
+    return;
+  }
+  if (a.audience === "students") {
+    await notifySchoolMembers(ctx, schoolId, { ...payload, link: "/student/announcements" }, ["student"]);
+    return;
+  }
   await notifySchoolMembers(ctx, schoolId, { ...payload, link: "/portal/announcements" });
 }
 

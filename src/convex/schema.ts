@@ -236,6 +236,9 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "results.view",
     "report_cards.view",
     "academic_analytics.view",
+    // Phase 4: teacher communication — teachers may post announcements to
+    // the classes they are allocated to (enforced in the create handler).
+    "announcements.view", "announcements.create",
   ],
   accountant: [
     "dashboard.view",
