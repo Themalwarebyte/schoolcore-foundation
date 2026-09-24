@@ -45,7 +45,7 @@ export const schoolInsights = query({
     for (const r of records) {
       if (!sessionIds.has(r.sessionId)) continue;
       const s = sessions.find((x) => x._id === r.sessionId)!;
-      const month = s.sessionDate.slice(0, 7);
+      const month = s.date.slice(0, 7);
       const bucket = byMonth.get(month) ?? { present: 0, total: 0 };
       bucket.total += 1;
       if (r.status === "present" || r.status === "late") bucket.present += 1;
@@ -74,8 +74,16 @@ export const schoolInsights = query({
       .query("invoices")
       .withIndex("by_school", (q) => q.eq("schoolId", schoolId))
       .collect();
-    const totalBilled = invoices.reduce((s, i) => s + i.totalAmount, 0);
-    const totalPaid = invoices.reduce((s, i) => s + (i.amountPaid ?? 0), 0);
+    const totalBilled = invoices
+      .filter((i) => i.status !== "cancelled")
+      .reduce((s, i) => s + i.totalAmount, 0);
+    const payments = await ctx.db
+      .query("payments")
+      .withIndex("by_school", (q) => q.eq("schoolId", schoolId))
+      .collect();
+    const totalPaid = payments
+      .filter((p) => p.status === "confirmed")
+      .reduce((s, p) => s + p.amount, 0);
     if (totalBilled > 0) {
       const rate = Math.round((totalPaid / totalBilled) * 1000) / 10;
       const outstanding = totalBilled - totalPaid;
@@ -97,7 +105,7 @@ export const schoolInsights = query({
     if (results.length >= 10) {
       const bySubject = new Map<string, number[]>();
       for (const r of results) {
-        const pct = (r.totalScore / Math.max(1, r.totalPossible)) * 100;
+        const pct = r.percentage;
         const list = bySubject.get(r.subjectId) ?? [];
         list.push(pct);
         bySubject.set(r.subjectId, list);
@@ -152,8 +160,8 @@ export const teacherInsights = query({
       .query("assessmentScores")
       .withIndex("by_school", (q) => q.eq("schoolId", schoolId))
       .collect()
-      .then((ss) => ss.filter((s) => s.enteredById === session.userId || s.status === "entered"));
-    const entered = scores.filter((s) => s.status === "entered" && s.score !== null);
+      .then((ss) => ss.filter((s) => s.recordedById === session.userId || s.status === "entered"));
+    const entered = scores.filter((s) => s.status === "entered" && s.score !== undefined);
     if (entered.length >= 5) {
       const avg = entered.reduce((s, x) => s + (x.score ?? 0), 0) / entered.length;
       insights.push({

@@ -153,7 +153,7 @@ export const fireEventInternal = internalMutation({
                 schoolId, userId, type: `automation_${trigger}`,
                 title: rule.name,
                 body: action.payload ?? `Automation "${rule.name}" fired.`,
-                read: false, createdAt: Date.now(),
+                readAt: undefined, createdAt: Date.now(),
               });
             }
             succeeded++;

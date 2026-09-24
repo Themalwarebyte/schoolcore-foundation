@@ -286,30 +286,33 @@ export const ingestDeviceEventInternal = internalMutation({
     }
 
     // Create the attendance record through the EXISTING attendance tables.
-    // A biometric event maps to a daily "present" session record for today.
+    // A biometric event maps to the active enrollment's daily session for today.
     const today = new Date(eventAt).toISOString().slice(0, 10);
-    const sessions = await ctx.db
-      .query("attendanceSessions")
-      .withIndex("by_school", (q) => q.eq("schoolId", schoolId))
+    const activeEnrollment = await ctx.db
+      .query("enrollments")
+      .withIndex("by_student", (q) => q.eq("studentId", enrollment.subjectId as Id<"students">))
       .collect()
-      .then((ss) =>
-        ss.find(
-          (s) =>
-            s.sessionType === "daily" && s.sessionDate === today &&
-            (s as { classSectionId?: Id<"classSections"> }).classSectionId !== undefined,
-        ),
+      .then((es) =>
+        es.find((e) => e.schoolId === schoolId && e.status === "active"),
       );
     let attendanceId: Id<"attendanceRecords"> | undefined;
-    if (sessions) {
-      attendanceId = await ctx.db.insert("attendanceRecords", {
-        schoolId,
-        sessionId: sessions._id,
-        studentId: enrollment.subjectId as Id<"students">,
-        status: "present",
-        recordedById: device.lastSeenAt ? enrollment.enrolledById : enrollment.enrolledById,
-        recordedAt: Date.now(),
-        source: "biometric",
-      } as never);
+    if (activeEnrollment) {
+      const session = await ctx.db
+        .query("attendanceSessions")
+        .withIndex("by_class_date", (q) =>
+          q.eq("classSectionId", activeEnrollment.classSectionId).eq("date", today),
+        )
+        .first();
+      if (session && session.schoolId === schoolId && session.sessionType === "daily") {
+        attendanceId = await ctx.db.insert("attendanceRecords", {
+          schoolId,
+          sessionId: session._id,
+          studentId: enrollment.subjectId as Id<"students">,
+          enrollmentId: activeEnrollment._id,
+          status: "present",
+          recordedById: enrollment.enrolledById,
+        });
+      }
     }
     await ctx.db.insert("deviceEvents", {
       schoolId, deviceId, deviceSubjectRef, eventType, eventAt,

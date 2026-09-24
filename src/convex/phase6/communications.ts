@@ -10,6 +10,7 @@
  */
 import { ConvexError, v } from "convex/values";
 import { internalMutation, internalQuery, mutation, query } from "../_generated/server";
+import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
 import { requirePermission, getSession } from "../session";
 import { recordAudit } from "../audit";
@@ -216,7 +217,7 @@ export const queueMessagesInternal = internalMutation({
           type: event,
           title: "School notice",
           body,
-          read: false,
+          readAt: undefined,
           createdAt: Date.now(),
         });
         await ctx.db.insert("commMessages", {
@@ -311,14 +312,14 @@ export const createBulkJob = mutation({
     const schoolId = session.schoolId as Id<"schools">;
     if (!body.trim()) throw new ConvexError("Message body is required.");
     if (body.length > 1000) throw new ConvexError("Message body is too long (max 1000 characters).");
-    const recipients = await ctx.runQuery(this.resolveRecipientsInternal, { schoolId, audience, audienceId });
+    const recipients = await ctx.runQuery(internal.phase6.communications.resolveRecipientsInternal, { schoolId, audience, audienceId });
     const jobId = await ctx.db.insert("commJobs", {
       schoolId, channel, event, audience, audienceId,
       body: renderTemplate(body, {}),
       totalCount: recipients.length, sentCount: 0, failedCount: 0,
       status: "queued", createdById: session.userId, createdAt: Date.now(),
     });
-    await ctx.runMutation(this.queueMessagesInternal, {
+    await ctx.runMutation(internal.phase6.communications.queueMessagesInternal, {
       schoolId, channel, event, body,
       recipients: recipients.map((r) => ({ userId: r.userId, studentId: r.studentId })),
       actorId: session.userId,
