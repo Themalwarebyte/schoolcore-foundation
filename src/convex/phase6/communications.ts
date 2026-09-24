@@ -9,8 +9,14 @@
  * "not configured" failure reason — never fake success.
  */
 import { ConvexError, v } from "convex/values";
-import { internalMutation, internalQuery, mutation, query } from "../_generated/server";
-import { internal } from "../_generated/api";
+import {
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+  type QueryCtx,
+  type MutationCtx,
+} from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
 import { requirePermission, getSession } from "../session";
 import { recordAudit } from "../audit";
@@ -148,15 +154,14 @@ export const setMyPreferences = mutation({
 /* Channel router (internal)                                           */
 /* ------------------------------------------------------------------ */
 
-/** Resolve recipients for an event + audience (parents of students, staff...). */
-export const resolveRecipientsInternal = internalQuery({
-  args: {
-    schoolId: v.id("schools"),
-    audience: v.string(), // all_parents | class | grade | student | staff_all
-    audienceId: v.optional(v.string()),
-  },
-  handler: async (ctx, { schoolId, audience, audienceId }) => {
-    const out: Array<{ userId: Id<"users">; studentId?: Id<"students">; address?: string }> = [];
+/** Shared recipient resolution (usable from both queries and mutations). */
+async function resolveRecipientsRows(
+  ctx: QueryCtx,
+  schoolId: Id<"schools">,
+  audience: string,
+  audienceId?: string,
+): Promise<Array<{ userId: Id<"users">; studentId?: Id<"students">; address?: string }>> {
+  const out: Array<{ userId: Id<"users">; studentId?: Id<"students">; address?: string }> = [];
     if (audience === "all_parents") {
       const links = await ctx.db
         .query("guardianPortalLinks")
@@ -185,10 +190,20 @@ export const resolveRecipientsInternal = internalQuery({
         }
       }
     }
-    // Dedupe by user.
-    const seen = new Set<string>();
-    return out.filter((o) => (seen.has(o.userId) ? false : (seen.add(o.userId), true)));
+  // Dedupe by user.
+  const seen = new Set<string>();
+  return out.filter((o) => (seen.has(o.userId) ? false : (seen.add(o.userId), true)));
+}
+
+/** Resolve recipients for an event + audience (parents of students, staff...). */
+export const resolveRecipientsInternal = internalQuery({
+  args: {
+    schoolId: v.id("schools"),
+    audience: v.string(), // all_parents | class | grade | student | staff_all
+    audienceId: v.optional(v.string()),
   },
+  handler: async (ctx, { schoolId, audience, audienceId }) =>
+    resolveRecipientsRows(ctx, schoolId, audience, audienceId),
 });
 
 /**
@@ -197,17 +212,16 @@ export const resolveRecipientsInternal = internalQuery({
  * SMS/email/WhatsApp require a configured provider — otherwise they are
  * stored with status failed + reason "not_configured" (never fake success).
  */
-export const queueMessagesInternal = internalMutation({
-  args: {
-    schoolId: v.id("schools"),
-    channel: v.string(), // in_app | sms | email | whatsapp
-    event: v.string(),
-    body: v.string(),
-    recipients: v.array(v.object({ userId: v.string(), studentId: v.optional(v.string()) })),
-    actorId: v.optional(v.id("users")),
-  },
-  handler: async (ctx, { schoolId, channel, event, body, recipients, actorId }) => {
-    let queued = 0;
+/** Shared message queuing (usable from both mutations and bulk jobs). */
+async function queueMessagesRows(
+  ctx: MutationCtx,
+  schoolId: Id<"schools">,
+  channel: string,
+  event: string,
+  body: string,
+  recipients: Array<{ userId: string; studentId?: string }>,
+): Promise<number> {
+  let queued = 0;
     for (const r of recipients) {
       if (channel === "in_app") {
         // Existing Phase 4 notification pipeline.
@@ -247,6 +261,26 @@ export const queueMessagesInternal = internalMutation({
       }
       queued++;
     }
+    return queued;
+}
+
+/**
+ * Queue messages for a set of recipients through the channel router.
+ * In-app messages are delivered via the existing notifications table.
+ * SMS/email/WhatsApp require a configured provider — otherwise they are
+ * stored with status failed + reason "not_configured" (never fake success).
+ */
+export const queueMessagesInternal = internalMutation({
+  args: {
+    schoolId: v.id("schools"),
+    channel: v.string(), // in_app | sms | email | whatsapp
+    event: v.string(),
+    body: v.string(),
+    recipients: v.array(v.object({ userId: v.string(), studentId: v.optional(v.string()) })),
+    actorId: v.optional(v.id("users")),
+  },
+  handler: async (ctx, { schoolId, channel, event, body, recipients }) => {
+    const queued = await queueMessagesRows(ctx, schoolId, channel, event, body, recipients);
     return { queued };
   },
 });
@@ -312,18 +346,17 @@ export const createBulkJob = mutation({
     const schoolId = session.schoolId as Id<"schools">;
     if (!body.trim()) throw new ConvexError("Message body is required.");
     if (body.length > 1000) throw new ConvexError("Message body is too long (max 1000 characters).");
-    const recipients = await ctx.runQuery(internal.phase6.communications.resolveRecipientsInternal, { schoolId, audience, audienceId });
+    const recipients = await resolveRecipientsRows(ctx, schoolId, audience, audienceId);
     const jobId = await ctx.db.insert("commJobs", {
       schoolId, channel, event, audience, audienceId,
       body: renderTemplate(body, {}),
       totalCount: recipients.length, sentCount: 0, failedCount: 0,
       status: "queued", createdById: session.userId, createdAt: Date.now(),
     });
-    await ctx.runMutation(internal.phase6.communications.queueMessagesInternal, {
-      schoolId, channel, event, body,
-      recipients: recipients.map((r) => ({ userId: r.userId, studentId: r.studentId })),
-      actorId: session.userId,
-    });
+    await queueMessagesRows(
+      ctx, schoolId, channel, event, body,
+      recipients.map((r) => ({ userId: r.userId, studentId: r.studentId })),
+    );
     await recordAudit(ctx, {
       userId: session.userId, schoolId, action: "communication.bulk_queued",
       entityType: "commJobs", entityId: jobId,

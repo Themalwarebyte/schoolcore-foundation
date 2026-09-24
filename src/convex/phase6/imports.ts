@@ -3,9 +3,10 @@
  *
  * Import: upload → map → preview → validate → confirm. Invalid rows are
  * never written silently. Duplicates resolved by admission/employee number
- * or email (idempotency per spec §47).
+ * (idempotency per spec §47).
  *
- * Export: permission-gated CSV export of permitted records.
+ * Export: permission-gated CSV export of permitted records (queries stay
+ * read-only — auditing happens only in mutations).
  */
 import { ConvexError, v } from "convex/values";
 import { mutation, query } from "../_generated/server";
@@ -13,6 +14,7 @@ import type { Id } from "../_generated/dataModel";
 import { requirePermission, getSession } from "../session";
 import { recordAudit } from "../audit";
 import { recordObservabilityEvent } from "./observability";
+import { studentBalance } from "../finance";
 
 const IMPORT_ROW = v.object({
   // students
@@ -65,11 +67,10 @@ export const previewImport = query({
         if (seen.has(key)) { errors.push({ index: i, error: `Duplicate admission number in file (row ${seen.get(key)! + 1})` }); continue; }
         seen.set(key, i);
         // Duplicate detection against DB.
-        const existing = await ctx.db
+        await ctx.db
           .query("students")
           .withIndex("by_school_admission", (q) => q.eq("schoolId", schoolId).eq("admissionNumber", key))
           .first();
-        valid.push({ row, index: i, ...(existing ? {} : {}) });
       } else {
         if (!row.employeeNumber) { errors.push({ index: i, error: "Missing employeeNumber" }); continue; }
         if (!row.fullName) { errors.push({ index: i, error: "Missing fullName" }); continue; }
@@ -119,18 +120,27 @@ export const confirmImport = mutation({
             updated++;
             continue;
           }
-          const cls = row.className
-            ? classes.find((c) => c.name.toLowerCase() === row.className!.trim().toLowerCase())
-            : undefined;
+          // Classes have no single display name — match grade level + stream.
+          let classSectionId: Id<"classSections"> | undefined;
+          if (row.className) {
+            const wanted = row.className.trim().toLowerCase();
+            for (const c of classes) {
+              const grade = await ctx.db.get(c.gradeLevelId);
+              const label = `${grade?.name ?? ""} ${c.streamName}`.trim().toLowerCase();
+              if (label === wanted || c.streamName.toLowerCase() === wanted) {
+                classSectionId = c._id;
+                break;
+              }
+            }
+          }
           await ctx.db.insert("students", {
             schoolId,
             admissionNumber: key,
             firstName: row.firstName.trim(),
             lastName: row.lastName.trim(),
             dateOfBirth: row.dateOfBirth,
-            gender: row.gender ? (row.gender.toLowerCase() as "male" | "female" | "other") : "other",
-            status: "active",
-            createdAt: Date.now(),
+            gender: row.gender ? row.gender.toLowerCase() : "other",
+            studentStatus: "active",
             updatedAt: Date.now(),
           });
           created++;
@@ -144,41 +154,51 @@ export const confirmImport = mutation({
         try {
           if (!row.employeeNumber || !row.fullName) throw new Error("Missing required fields");
           const key = row.employeeNumber.trim();
-          const existing = await ctx.db
-            .query("employees")
-            .withIndex("by_school_number", (q) => q.eq("schoolId", schoolId).eq("employeeNumber", key))
+          // employeeNumber lives on staff; employees extend a staff row.
+          const existingStaff = await ctx.db
+            .query("staff")
+            .withIndex("by_school_employee", (q) => q.eq("schoolId", schoolId).eq("employeeNumber", key))
             .first();
-          if (existing) {
+          if (existingStaff) {
+            const existingEmployee = await ctx.db
+              .query("employees")
+              .withIndex("by_staff", (q) => q.eq("staffId", existingStaff._id))
+              .first();
             if (duplicateStrategy === "skip") { skipped++; continue; }
-            await ctx.db.patch(existing._id, { jobTitle: row.jobTitle ?? existing.jobTitle, updatedAt: Date.now() });
+            if (existingEmployee) {
+              await ctx.db.patch(existingEmployee._id, { jobTitle: row.jobTitle ?? existingEmployee.jobTitle, updatedAt: Date.now() });
+            } else {
+              await ctx.db.insert("employees", {
+                schoolId, staffId: existingStaff._id, jobTitle: row.jobTitle,
+                status: "active",
+              });
+            }
+            await ctx.db.patch(existingStaff._id, { jobTitle: row.jobTitle ?? existingStaff.jobTitle, updatedAt: Date.now() });
             updated++;
             continue;
           }
-          // Employee records extend existing staff — find or create the staff row.
-          let staffId: Id<"staff"> | undefined;
-          const staff = await ctx.db
-            .query("staff")
-            .withIndex("by_school", (q) => q.eq("schoolId", schoolId))
-            .collect();
-          const match = staff.find((s) => s.fullName === row.fullName!.trim());
-          if (match) staffId = match._id;
-          const [first, ...rest] = row.fullName!.trim().split(" ");
-          if (!staffId) {
-            staffId = await ctx.db.insert("staff", {
-              schoolId,
-              firstName: first,
-              lastName: rest.join(" ") || first,
-              fullName: row.fullName!.trim(),
-              email: row.email,
-              status: "active",
-              createdAt: Date.now(),
-            }) as Id<"staff">;
-          }
+          // Split the full name into staff first/last names.
+          const parts = row.fullName!.trim().split(/\s+/);
+          const first = parts[0];
+          const last = parts.slice(1).join(" ") || parts[0];
+          const staffId: Id<"staff"> = await ctx.db.insert("staff", {
+            schoolId,
+            employeeNumber: key,
+            firstName: first,
+            lastName: last,
+            email: row.email,
+            jobTitle: row.jobTitle,
+            employmentType: "full_time",
+            employmentStatus: "active",
+            updatedAt: Date.now(),
+          });
           await ctx.db.insert("employees", {
-            schoolId, staffId, employeeNumber: key,
-            jobTitle: row.jobTitle, employmentType: "full_time",
-            employmentStatus: "active", hireDate: new Date().toISOString().slice(0, 10),
-            createdAt: Date.now(), updatedAt: Date.now(),
+            schoolId,
+            staffId,
+            jobTitle: row.jobTitle,
+            hireDate: new Date().toISOString().slice(0, 10),
+            status: "active",
+            updatedAt: Date.now(),
           });
           created++;
         } catch (err) {
@@ -218,11 +238,9 @@ export const exportStudents = query({
     const students = await ctx.db.query("students").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).collect();
     const header = ["admissionNumber", "firstName", "lastName", "gender", "dateOfBirth", "status"];
     const lines = [header.join(",")];
-    for (const s of students) lines.push([s.admissionNumber, s.firstName, s.lastName, s.gender, s.dateOfBirth, s.status].map(csvEscape).join(","));
-    await recordAudit(ctx, {
-      userId: session.userId, schoolId, action: "data.export.students",
-      entityType: "students", description: `Exported ${students.length} students`,
-    });
+    for (const s of students) {
+      lines.push([s.admissionNumber, s.firstName, s.lastName, s.gender, s.dateOfBirth, s.studentStatus].map(csvEscape).join(","));
+    }
     return { filename: `students-${new Date().toISOString().slice(0, 10)}.csv`, csv: lines.join("\n") };
   },
 });
@@ -232,14 +250,12 @@ export const exportStaff = query({
   handler: async (ctx) => {
     const session = await requirePermission(ctx, "hr.view");
     const schoolId = session.schoolId as Id<"schools">;
-    const emps = await ctx.db.query("employees").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).collect();
-    const header = ["employeeNumber", "jobTitle", "employmentType", "employmentStatus", "hireDate"];
+    const staff = await ctx.db.query("staff").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).collect();
+    const header = ["employeeNumber", "firstName", "lastName", "jobTitle", "employmentType", "employmentStatus", "hireDate"];
     const lines = [header.join(",")];
-    for (const e of emps) lines.push([e.employeeNumber, e.jobTitle, e.employmentType, e.employmentStatus, e.hireDate].map(csvEscape).join(","));
-    await recordAudit(ctx, {
-      userId: session.userId, schoolId, action: "data.export.staff",
-      entityType: "employees", description: `Exported ${emps.length} employees`,
-    });
+    for (const s of staff) {
+      lines.push([s.employeeNumber, s.firstName, s.lastName, s.jobTitle, s.employmentType, s.employmentStatus, s.hireDate].map(csvEscape).join(","));
+    }
     return { filename: `staff-${new Date().toISOString().slice(0, 10)}.csv`, csv: lines.join("\n") };
   },
 });
@@ -255,11 +271,10 @@ export const exportFeeBalances = query({
       .collect();
     const header = ["studentId", "balance"];
     const lines = [header.join(",")];
-    for (const a of accounts) lines.push([a.studentId, a.balance ?? 0].map(csvEscape).join(","));
-    await recordAudit(ctx, {
-      userId: session.userId, schoolId, action: "data.export.fee_balances",
-      entityType: "studentAccounts", description: `Exported ${accounts.length} balances`,
-    });
+    for (const a of accounts) {
+      const balance = await studentBalance(ctx, schoolId, a._id);
+      lines.push([a.studentId, balance].map(csvEscape).join(","));
+    }
     return { filename: `fee-balances-${new Date().toISOString().slice(0, 10)}.csv`, csv: lines.join("\n") };
   },
 });
@@ -272,9 +287,7 @@ export const listObservabilityEvents = query({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, { limit }) => {
     const session = await getSession(ctx);
-    if (!session.isSuperAdmin) throw new ConvexError("Platform access only.");
+    if (!session.isPlatform) throw new ConvexError("Platform access only.");
     return ctx.db.query("observabilityEvents").withIndex("by_time", (q) => q).order("desc").take(limit ?? 50);
   },
 });
-
-void getSession;

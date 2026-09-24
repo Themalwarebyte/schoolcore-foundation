@@ -50,8 +50,10 @@ export const platformListPlans = query({
   args: {},
   handler: async (ctx) => {
     const session = await getSession(ctx);
-    if (!session.isSuperAdmin) throw new ConvexError("Platform access only.");
-    return ctx.db.query("plans").withIndex("by_slug", (q) => q).collect();
+    if (!session.isPlatform) throw new ConvexError("Platform access only.");
+    return (await ctx.db.query("plans").collect()).sort((a, b) =>
+      (a.displayOrder ?? 99) - (b.displayOrder ?? 99) || a.name.localeCompare(b.name),
+    );
   },
 });
 
@@ -68,7 +70,7 @@ export const platformUpsertPlan = mutation({
   },
   handler: async (ctx, args) => {
     const session = await getSession(ctx);
-    if (!session.isSuperAdmin) throw new ConvexError("Platform access only.");
+    if (!session.isPlatform) throw new ConvexError("Platform access only.");
     if (args.planId) {
       await ctx.db.patch(args.planId, {
         name: args.name, description: args.description, monthlyPrice: args.monthlyPrice,
@@ -91,7 +93,7 @@ export const platformListSubscriptions = query({
   args: {},
   handler: async (ctx) => {
     const session = await getSession(ctx);
-    if (!session.isSuperAdmin) throw new ConvexError("Platform access only.");
+    if (!session.isPlatform) throw new ConvexError("Platform access only.");
     const subs = await ctx.db.query("schoolSubscriptions").withIndex("by_school", (q) => q).collect();
     return Promise.all(
       subs.map(async (s) => {
@@ -117,7 +119,7 @@ export const platformSetSubscriptionStatus = mutation({
   args: { subscriptionId: v.id("schoolSubscriptions"), status: v.string() },
   handler: async (ctx, { subscriptionId, status }) => {
     const session = await getSession(ctx);
-    if (!session.isSuperAdmin) throw new ConvexError("Platform access only.");
+    if (!session.isPlatform) throw new ConvexError("Platform access only.");
     if (!SUBSCRIPTION_STATUSES.includes(status as never)) throw new ConvexError("Unknown subscription status.");
     const sub = await ctx.db.get(subscriptionId);
     if (!sub) throw new ConvexError("Subscription not found.");
@@ -140,7 +142,7 @@ export const platformAssignPlan = mutation({
   args: { schoolId: v.id("schools"), planId: v.id("plans") },
   handler: async (ctx, { schoolId, planId }) => {
     const session = await getSession(ctx);
-    if (!session.isSuperAdmin) throw new ConvexError("Only the platform can change a school's plan.");
+    if (!session.isPlatform) throw new ConvexError("Only the platform can change a school's plan.");
     const plan = await ctx.db.get(planId);
     if (!plan) throw new ConvexError("Plan not found.");
     const existing = await ctx.db
@@ -227,8 +229,8 @@ export const platformUsage = query({
   args: {},
   handler: async (ctx) => {
     const session = await getSession(ctx);
-    if (!session.isSuperAdmin) throw new ConvexError("Platform access only.");
-    const schools = await ctx.db.query("schools").withIndex("by_school", (q) => q).collect();
+    if (!session.isPlatform) throw new ConvexError("Platform access only.");
+    const schools = await ctx.db.query("schools").collect();
     const memberships = await ctx.db.query("schoolMemberships").withIndex("by_school", (q) => q).collect();
     const subs = await ctx.db.query("schoolSubscriptions").withIndex("by_school", (q) => q).collect();
     const students = await ctx.db.query("students").withIndex("by_school", (q) => q).collect();
@@ -262,12 +264,12 @@ export const platformHealth = query({
   args: {},
   handler: async (ctx) => {
     const session = await getSession(ctx);
-    if (!session.isSuperAdmin) throw new ConvexError("Platform access only.");
+    if (!session.isPlatform) throw new ConvexError("Platform access only.");
     const checks: Array<{ component: string; status: string; detail: string }> = [];
 
     // Database: a real query round-trip.
     const t0 = Date.now();
-    const schoolCount = (await ctx.db.query("schools").withIndex("by_school", (q) => q).collect()).length;
+    const schoolCount = (await ctx.db.query("schools").collect()).length;
     checks.push({
       component: "Database", status: "healthy",
       detail: `${schoolCount} school(s); query ${Date.now() - t0}ms`,
@@ -296,5 +298,3 @@ export const platformHealth = query({
     return { checks, generatedAt: Date.now() };
   },
 });
-
-void Id;

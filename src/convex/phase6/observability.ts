@@ -4,16 +4,20 @@
  * Frontend errors are captured client-side and reported here.
  */
 import { ConvexError, v } from "convex/values";
-import { internalMutation, mutation, query } from "../_generated/server";
+import { mutation, query, type MutationCtx } from "../_generated/server";
+import type { Id } from "../_generated/dataModel";
 import { getSession } from "../session";
 
-export const recordObservabilityEvent = async (
-  ctx: { db: { insert: (t: string, d: unknown) => Promise<unknown> } },
+export async function recordObservabilityEvent(
+  ctx: MutationCtx,
   args: {
-    schoolId?: unknown; severity: "info" | "warning" | "error" | "critical";
-    component: string; message: string; details?: unknown;
+    schoolId?: Id<"schools"> | null;
+    severity: "info" | "warning" | "error" | "critical";
+    component: string;
+    message: string;
+    details?: unknown;
   },
-) => {
+) {
   return ctx.db.insert("observabilityEvents", {
     schoolId: args.schoolId ?? undefined,
     severity: args.severity,
@@ -22,7 +26,7 @@ export const recordObservabilityEvent = async (
     details: args.details ?? undefined,
     createdAt: Date.now(),
   });
-};
+}
 
 export const reportFrontendError = mutation({
   args: {
@@ -49,8 +53,12 @@ export const errorSummary = query({
   args: {},
   handler: async (ctx) => {
     const session = await getSession(ctx);
-    if (!session.isSuperAdmin) throw new ConvexError("Platform access only.");
-    const events = await ctx.db.query("observabilityEvents").withIndex("by_time", (q) => q).order("desc").take(500);
+    if (!session.isPlatform) throw new ConvexError("Platform access only.");
+    const events = await ctx.db
+      .query("observabilityEvents")
+      .withIndex("by_time", (q) => q)
+      .order("desc")
+      .take(500);
     const byComponent: Record<string, number> = {};
     const bySeverity: Record<string, number> = {};
     for (const e of events) {
@@ -60,5 +68,3 @@ export const errorSummary = query({
     return { totalRecent: events.length, byComponent, bySeverity, latest: events.slice(0, 20) };
   },
 });
-
-void internalMutation;
