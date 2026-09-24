@@ -1854,6 +1854,384 @@ const schema = defineSchema(
       mimeType: v.string(),
       bytes: v.optional(v.bytes()),
     }).index("by_school", ["schoolId"]),
+
+/* ==================================================================== */
+/* Phase 6 — integrations, external payments, communication, QR,        */
+/* biometrics, GPS, automation, SaaS, feature flags, data import        */
+/* ==================================================================== */
+
+    /* ---------------- integration configuration ---------------- */
+
+    /**
+     * Per-school provider configuration. Secrets are NEVER stored here —
+     * only safe, non-secret metadata and enabled flags. Actual credentials
+     * live in server environment variables only.
+     */
+    integrations: defineTable({
+      schoolId: v.id("schools"),
+      kind: v.string(), // payments | sms | email | whatsapp | gps
+      provider: v.string(), // mpesa_daraja | none | ...
+      environment: v.string(), // sandbox | production | not_configured
+      enabled: v.boolean(),
+      /** Non-secret display metadata (e.g. masked shortcode "1234***"). */
+      displayMetadata: v.optional(v.record(v.string(), v.string())),
+      configuredById: v.optional(v.id("users")),
+      updatedAt: v.optional(v.number()),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_school_kind", ["schoolId", "kind"]),
+
+    /* ---------------- external payments (M-Pesa) ---------------- */
+
+    /** Parent-initiated STK push / payment request. Pending until verified. */
+    paymentRequests: defineTable({
+      schoolId: v.id("schools"),
+      studentId: v.id("students"),
+      invoiceId: v.optional(v.id("invoices")),
+      amount: v.number(),
+      account: v.string(),
+      phone: v.string(),
+      status: v.string(), // PAYMENT_REQUEST_STATUSES
+      provider: v.string(),
+      providerRequestId: v.optional(v.string()),
+      providerRef: v.optional(v.string()),
+      failureReason: v.optional(v.string()),
+      initiatedById: v.optional(v.id("users")),
+      createdAt: v.number(),
+      updatedAt: v.optional(v.number()),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_student", ["studentId"])
+      .index("by_provider_ref", ["providerRef"])
+      .index("by_school_status", ["schoolId", "status"]),
+
+    /**
+     * Raw provider transactions received via callback — the reconciliation
+     * source of truth between the provider and SchoolCore payments.
+     */
+    providerTransactions: defineTable({
+      schoolId: v.optional(v.id("schools")),
+      account: v.string(),
+      providerTxnId: v.string(),
+      providerRequestId: v.optional(v.string()),
+      amount: v.number(),
+      phone: v.optional(v.string()),
+      status: v.string(),
+      resultDesc: v.optional(v.string()),
+      matchedPaymentId: v.optional(v.id("payments")),
+      matchedById: v.optional(v.id("users")),
+      matchedAt: v.optional(v.number()),
+      receivedAt: v.number(),
+    })
+      .index("by_provider_txn", ["providerTxnId"])
+      .index("by_school", ["schoolId"])
+      .index("by_account", ["account"])
+      .index("by_school_status", ["schoolId", "status"]),
+
+    /* ---------------- communication platform ---------------- */
+
+    smsTemplates: defineTable({
+      schoolId: v.id("schools"),
+      event: v.string(),
+      name: v.string(),
+      body: v.string(),
+      enabled: v.boolean(),
+      updatedAt: v.optional(v.number()),
+      updatedById: v.optional(v.id("users")),
+    })
+      .index("by_school_event", ["schoolId", "event"]),
+
+    emailTemplates: defineTable({
+      schoolId: v.id("schools"),
+      event: v.string(),
+      name: v.string(),
+      subject: v.string(),
+      html: v.optional(v.string()),
+      text: v.optional(v.string()),
+      enabled: v.boolean(),
+      updatedAt: v.optional(v.number()),
+      updatedById: v.optional(v.id("users")),
+    })
+      .index("by_school_event", ["schoolId", "event"]),
+
+    /** Every outbound message (queued or sent) across channels. */
+    commMessages: defineTable({
+      schoolId: v.id("schools"),
+      channel: v.string(), // in_app | sms | email | whatsapp
+      event: v.string(),
+      templateId: v.optional(v.string()),
+      recipientKind: v.string(), // parent | student | staff | custom
+      recipientUserId: v.optional(v.id("users")),
+      recipientAddress: v.optional(v.string()),
+      studentId: v.optional(v.id("students")),
+      body: v.string(),
+      status: v.string(), // COMM_STATUSES
+      providerMessageId: v.optional(v.string()),
+      failureReason: v.optional(v.string()),
+      attempts: v.number(),
+      queuedAt: v.number(),
+      sentAt: v.optional(v.number()),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_school_status", ["schoolId", "status"])
+      .index("by_recipient", ["recipientUserId"])
+      .index("by_status", ["status"]),
+
+    /** Per-user channel preferences. */
+    commPreferences: defineTable({
+      schoolId: v.id("schools"),
+      userId: v.id("users"),
+      inApp: v.boolean(),
+      sms: v.boolean(),
+      email: v.boolean(),
+      whatsapp: v.optional(v.boolean()),
+      updatedAt: v.optional(v.number()),
+    })
+      .index("by_user", ["userId"])
+      .index("by_school", ["schoolId"]),
+
+    /** Bulk communication jobs (batched, idempotent sends). */
+    commJobs: defineTable({
+      schoolId: v.id("schools"),
+      channel: v.string(),
+      event: v.string(),
+      audience: v.string(),
+      audienceId: v.optional(v.string()),
+      body: v.string(),
+      totalCount: v.number(),
+      sentCount: v.number(),
+      failedCount: v.number(),
+      status: v.string(),
+      createdById: v.id("users"),
+      createdAt: v.number(),
+      completedAt: v.optional(v.number()),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_status", ["status"]),
+
+    /* ---------------- QR identity ---------------- */
+
+    /**
+     * Opaque QR tokens for students and staff. Tokens carry NO personal
+     * data; they resolve server-side to a permitted identity view only.
+     */
+    qrTokens: defineTable({
+      schoolId: v.id("schools"),
+      subjectKind: v.string(), // student | staff
+      subjectId: v.id("students"),
+      token: v.string(),
+      active: v.boolean(),
+      issuedById: v.id("users"),
+      issuedAt: v.number(),
+      revokedAt: v.optional(v.number()),
+    })
+      .index("by_token", ["token"])
+      .index("by_subject", ["subjectId"])
+      .index("by_school", ["schoolId"]),
+
+    /* ---------------- biometric attendance foundation ---------------- */
+
+    /**
+     * Biometric device enrollment references. No biometric data is stored —
+     * only the device's own identifier for a subject.
+     */
+    biometricEnrollments: defineTable({
+      schoolId: v.id("schools"),
+      subjectKind: v.string(), // student | staff
+      subjectId: v.id("students"),
+      deviceId: v.string(),
+      deviceSubjectRef: v.string(),
+      status: v.string(), // active | revoked
+      enrolledById: v.id("users"),
+      enrolledAt: v.number(),
+      revokedAt: v.optional(v.number()),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_device_ref", ["deviceId", "deviceSubjectRef"])
+      .index("by_subject", ["subjectId"]),
+
+    /** Registered biometric devices (per school, optional). */
+    biometricDevices: defineTable({
+      schoolId: v.id("schools"),
+      deviceId: v.string(),
+      label: v.string(),
+      location: v.optional(v.string()),
+      secretRef: v.string(),
+      status: v.string(), // active | disabled
+      lastSeenAt: v.optional(v.number()),
+      createdAt: v.number(),
+    })
+      .index("by_device", ["deviceId"])
+      .index("by_school", ["schoolId"]),
+
+    /** Staging table for verified device attendance events before dedup. */
+    deviceEvents: defineTable({
+      schoolId: v.id("schools"),
+      deviceId: v.string(),
+      deviceSubjectRef: v.string(),
+      eventType: v.string(), // attendance_in | attendance_out
+      eventAt: v.number(),
+      processed: v.boolean(),
+      processedAttendanceId: v.optional(v.id("attendanceRecords")),
+      duplicate: v.optional(v.boolean()),
+      receivedAt: v.number(),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_device", ["deviceId"])
+      .index("by_processed", ["processed"]),
+
+    /* ---------------- transport GPS ---------------- */
+
+    /** GPS devices attached to existing Phase 5 vehicles. */
+    gpsDevices: defineTable({
+      schoolId: v.id("schools"),
+      vehicleId: v.id("vehicles"),
+      deviceId: v.string(),
+      provider: v.string(),
+      status: v.string(), // active | disabled
+      secretRef: v.string(),
+      lastSeenAt: v.optional(v.number()),
+      createdAt: v.number(),
+    })
+      .index("by_device", ["deviceId"])
+      .index("by_school", ["schoolId"])
+      .index("by_vehicle", ["vehicleId"]),
+
+    /** Recent location pings. Retention enforced by a scheduled job. */
+    gpsPings: defineTable({
+      schoolId: v.id("schools"),
+      gpsDeviceId: v.id("gpsDevices"),
+      vehicleId: v.id("vehicles"),
+      lat: v.number(),
+      lng: v.number(),
+      speedKph: v.optional(v.number()),
+      heading: v.optional(v.number()),
+      recordedAt: v.number(),
+      receivedAt: v.number(),
+    })
+      .index("by_vehicle_time", ["vehicleId", "recordedAt"])
+      .index("by_school", ["schoolId"])
+      .index("by_recorded", ["recordedAt"]),
+
+    /* ---------------- automation engine ---------------- */
+
+    automations: defineTable({
+      schoolId: v.id("schools"),
+      name: v.string(),
+      trigger: v.string(),
+      condition: v.optional(
+        v.object({
+          field: v.string(),
+          op: v.string(), // gt | lt | eq
+          value: v.string(),
+        }),
+      ),
+      actions: v.array(
+        v.object({
+          type: v.string(), // in_app | sms | email | task | admin_alert
+          payload: v.optional(v.string()),
+        }),
+      ),
+      enabled: v.boolean(),
+      createdById: v.id("users"),
+      createdAt: v.number(),
+      updatedAt: v.optional(v.number()),
+    })
+      .index("by_school_trigger", ["schoolId", "trigger"])
+      .index("by_school", ["schoolId"]),
+
+    automationRuns: defineTable({
+      schoolId: v.id("schools"),
+      automationId: v.id("automations"),
+      trigger: v.string(),
+      targetKind: v.string(),
+      targetId: v.optional(v.string()),
+      actionsAttempted: v.number(),
+      actionsSucceeded: v.number(),
+      status: v.string(), // success | partial | failed
+      detail: v.optional(v.string()),
+      ranAt: v.number(),
+    })
+      .index("by_automation", ["automationId"])
+      .index("by_school", ["schoolId"])
+      .index("by_ran_at", ["ranAt"]),
+
+    /* ---------------- SaaS subscriptions ---------------- */
+
+    plans: defineTable({
+      name: v.string(),
+      slug: v.string(),
+      description: v.optional(v.string()),
+      monthlyPrice: v.number(),
+      currency: v.string(),
+      /** Entitlements: maxStudents, sms, gps, ai, advancedAnalytics... */
+      entitlements: v.record(v.string(), v.union(v.string(), v.number(), v.boolean())),
+      displayOrder: v.number(),
+      active: v.boolean(),
+      createdAt: v.number(),
+    }).index("by_slug", ["slug"]),
+
+    schoolSubscriptions: defineTable({
+      schoolId: v.id("schools"),
+      planId: v.id("plans"),
+      status: v.string(), // SUBSCRIPTION_STATUSES
+      trialEndsAt: v.optional(v.number()),
+      currentPeriodEnd: v.optional(v.number()),
+      startedAt: v.number(),
+      cancelledAt: v.optional(v.number()),
+      updatedAt: v.optional(v.number()),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_status", ["status"]),
+
+    subscriptionInvoices: defineTable({
+      schoolId: v.id("schools"),
+      subscriptionId: v.id("schoolSubscriptions"),
+      invoiceNumber: v.string(),
+      amount: v.number(),
+      currency: v.string(),
+      periodStart: v.string(),
+      periodEnd: v.string(),
+      status: v.string(), // paid | open | void
+      createdAt: v.number(),
+      paidAt: v.optional(v.number()),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_subscription", ["subscriptionId"]),
+
+    /** Per-school/platform feature flags (platform > plan > school). */
+    featureFlags: defineTable({
+      /** Undefined = platform-level flag. */
+      schoolId: v.optional(v.id("schools")),
+      key: v.string(),
+      enabled: v.boolean(),
+      note: v.optional(v.string()),
+      updatedAt: v.optional(v.number()),
+      updatedById: v.optional(v.id("users")),
+    })
+      .index("by_key", ["key"])
+      .index("by_school_key", ["schoolId", "key"]),
+
+    /* ---------------- data import jobs ---------------- */
+
+    importJobs: defineTable({
+      schoolId: v.id("schools"),
+      kind: v.string(), // students | guardians | staff
+      filename: v.string(),
+      status: v.string(), // draft | validated | imported | failed
+      columnMap: v.record(v.string(), v.string()),
+      rowsTotal: v.number(),
+      rowsValid: v.number(),
+      rowsInvalid: v.number(),
+      errors: v.array(v.object({ row: v.number(), field: v.string(), message: v.string() })),
+      stagedRows: v.array(v.record(v.string(), v.string())),
+      dedupeStrategy: v.string(), // skip | update
+      createdById: v.id("users"),
+      createdAt: v.number(),
+      completedAt: v.optional(v.number()),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_status", ["status"]),
   },
   {
     schemaValidation: false,
