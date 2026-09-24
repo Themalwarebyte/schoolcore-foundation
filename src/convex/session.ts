@@ -33,10 +33,7 @@ async function loadUser(
   return user;
 }
 
-/**
- * Resolve the caller's session: platform super admin, or a school-scoped role.
- * Throws if the user is not signed in or has no active memberships.
- */
+/** Resolve the caller's session: platform super admin, or a school-scoped role. */
 export async function getSession(
   ctx: QueryCtx | MutationCtx,
   opts: { schoolId?: string | null } = {},
@@ -141,11 +138,7 @@ export async function requirePermission(
   return session;
 }
 
-/**
- * Session that must hold at least one of the given permissions — used by
- * shared portal endpoints (e.g. a report-card view reachable by both a
- * parent for their child and a student for themselves).
- */
+/** Session that must hold at least one of the given permissions. */
 export async function requireAnyPermission(
   ctx: QueryCtx | MutationCtx,
   permissions: Permission[],
@@ -208,44 +201,29 @@ type SchoolScopedTable =
   | "announcements"
   | "guardianPortalLinks"
   | "studentPortalLinks"
-  | "departments"
-  | "employees"
-  | "contracts"
-  | "staffDocuments"
-  | "leaveTypes"
-  | "leaveRequests"
-  | "salaryStructures"
-  | "salaryComponents"
-  | "payrollRuns"
-  | "payslips"
-  | "libraryCategories"
-  | "books"
-  | "bookCopies"
-  | "bookLoans"
-  | "vehicles"
-  | "drivers"
-  | "transportRoutes"
-  | "routeStops"
-  | "transportAssignments"
-  | "hostels"
-  | "hostelRooms"
-  | "beds"
-  | "boardingAllocations"
-  | "assets"
-  | "inventoryItems"
-  | "stockMovements"
-  | "suppliers"
-  | "purchaseRequests"
-  | "purchaseRequestItems"
-  | "purchaseOrders"
-  | "medicalProfiles"
-  | "clinicVisits";
+  | "integrations"
+  | "paymentRequests"
+  | "providerTransactions"
+  | "smsTemplates"
+  | "emailTemplates"
+  | "commMessages"
+  | "commPreferences"
+  | "commJobs"
+  | "qrTokens"
+  | "biometricEnrollments"
+  | "biometricDevices"
+  | "deviceEvents"
+  | "gpsDevices"
+  | "gpsPings"
+  | "automations"
+  | "automationRuns"
+  | "plans"
+  | "schoolSubscriptions"
+  | "subscriptionInvoices"
+  | "featureFlags"
+  | "importJobs";
 
-/**
- * Fetch a school-scoped record by ID and verify it belongs to the caller's
- * school. This is the single choke point that blocks cross-tenant reads and
- * writes by forged IDs.
- */
+/** Fetch a school-scoped record by ID and verify it belongs to the caller's school. */
 export async function getSchoolRecord<T extends SchoolScopedTable>(
   ctx: QueryCtx | MutationCtx,
   schoolId: Id<"schools">,
