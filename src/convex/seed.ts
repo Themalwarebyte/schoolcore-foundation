@@ -100,6 +100,8 @@ export const seedAll = action({
         await ctx.runAction(internal.accounts.ensureDemoAccountAccess, acct);
       }
       await ctx.runMutation(internal.seedHelpers.seedPortalDemo, {});
+      // Fill any Phase 5 operations-ERP gaps (idempotent).
+      await ctx.runMutation(internal.seedOperations.seedOperations, {});
       return { skipped: true as const, message: "Seed data already present. Bootstrap admin + demo accounts ensured." };
     }
     const superAdminId = await ctx.runQuery(internal.seedHelpers.findUserByEmail, {
@@ -484,6 +486,9 @@ export const seedAll = action({
       });
     }
     await ctx.runMutation(internal.seedHelpers.seedPortalDemo, {});
+    // Phase 5 operations-ERP demo data (HR, payroll, library, transport,
+    // boarding, inventory, procurement, medical) — idempotent.
+    await ctx.runMutation(internal.seedOperations.seedOperations, {});
 
     return {
       skipped: false as const,

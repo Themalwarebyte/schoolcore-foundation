@@ -74,6 +74,15 @@ const PortalReportCardDetail = lazy(() => import("./pages/portal/PortalShared.ts
 // Phase 4: admin communication
 const PortalAccessAdmin = lazy(() => import("./pages/admin/PortalAccess.tsx"));
 const AnnouncementsAdmin = lazy(() => import("./pages/admin/Announcements.tsx"));
+// Phase 5: operations ERP
+const HR = lazy(() => import("./pages/ops/HR.tsx"));
+const Payroll = lazy(() => import("./pages/ops/Payroll.tsx"));
+const Library = lazy(() => import("./pages/ops/Library.tsx"));
+const Transport = lazy(() => import("./pages/ops/Transport.tsx"));
+const Boarding = lazy(() => import("./pages/ops/Boarding.tsx"));
+const Inventory = lazy(() => import("./pages/ops/InventoryPage.tsx"));
+const Procurement = lazy(() => import("./pages/ops/Procurement.tsx"));
+const Medical = lazy(() => import("./pages/ops/Medical.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
 // Simple loading fallback for route transitions
@@ -228,6 +237,14 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="/finance/reports" element={<Reports />} />
                 <Route path="/portal-access" element={<PortalAccessAdmin />} />
                 <Route path="/announcements" element={<AnnouncementsAdmin />} />
+                <Route path="/hr" element={<HR />} />
+                <Route path="/payroll" element={<Payroll />} />
+                <Route path="/library" element={<Library />} />
+                <Route path="/transport" element={<Transport />} />
+                <Route path="/boarding" element={<Boarding />} />
+                <Route path="/inventory" element={<Inventory />} />
+                <Route path="/procurement" element={<Procurement />} />
+                <Route path="/medical" element={<Medical />} />
               </Route>
 
               {/* Parent portal (mobile-first, child-scoped) */}

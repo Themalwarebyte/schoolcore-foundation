@@ -1292,6 +1292,16 @@ export const seedFinance = internalMutation({
 /* ------------------------------------------------------------------ */
 
 const PURGE_TABLES = [
+  // Phase 5 (children first: loans→copies→books, payslips→runs, etc.)
+  "clinicVisits", "medicalProfiles",
+  "purchaseRequestItems", "purchaseOrders", "purchaseRequests", "suppliers",
+  "stockMovements", "inventoryItems", "assets",
+  "boardingAllocations", "beds", "hostelRooms", "hostels",
+  "transportAssignments", "routeStops", "transportRoutes", "drivers", "vehicles",
+  "bookLoans", "bookCopies", "books", "libraryCategories",
+  "payslips", "payrollRuns", "salaryComponents", "salaryStructures",
+  "leaveRequests", "leaveTypes", "staffDocuments", "contracts", "employees", "departments",
+  // Phases 1–4
   "guardianStudents", "enrollments", "teacherAllocations", "classSections",
   "gradeLevels", "subjects", "terms", "academicYears", "students", "guardians",
   "staff", "schoolMemberships", "auditLogs", "files", "schools",
