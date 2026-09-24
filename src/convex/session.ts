@@ -141,6 +141,24 @@ export async function requirePermission(
   return session;
 }
 
+/**
+ * Session that must hold at least one of the given permissions — used by
+ * shared portal endpoints (e.g. a report-card view reachable by both a
+ * parent for their child and a student for themselves).
+ */
+export async function requireAnyPermission(
+  ctx: QueryCtx | MutationCtx,
+  permissions: Permission[],
+  opts: { schoolId?: string | null } = {},
+): Promise<Session> {
+  const session = await getSession(ctx, opts);
+  const allowed = permissions.some((p) => can(session.role, p));
+  if (!allowed) {
+    throw new ConvexError("You do not have permission to perform this action.");
+  }
+  return session;
+}
+
 /* ------------------------------------------------------------------ */
 /* Tenant-safe record access                                           */
 /* ------------------------------------------------------------------ */
