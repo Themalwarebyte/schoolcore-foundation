@@ -284,7 +284,7 @@ function StructuresSection({
 /* ================================================================== */
 
 interface MyPayslip {
-  _id: string; basicSalary: number; grossPay: number; totalDeductions: number; netPay: number;
+  _id: string; payrollRunId: string; basicSalary: number; grossPay: number; totalDeductions: number; netPay: number;
   lines: Array<{ name: string; componentType: string; amount: number }>; generatedAt: number;
 }
 

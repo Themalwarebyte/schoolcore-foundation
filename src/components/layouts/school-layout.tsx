@@ -17,6 +17,8 @@ import {
   CalendarCheck, Clock, FileEdit, ClipboardCheck, SlidersHorizontal, Award,
   FileSpreadsheet, TrendingUp, Bell, Landmark, Wallet, Receipt, HandCoins, PieChart,
   Megaphone,
+  // Phase 5 icons
+  Briefcase, Banknote, BookMarked, Bus, BedDouble, Package, ShoppingCart, Stethoscope,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuthActions } from "@convex-dev/auth/react";
@@ -84,6 +86,19 @@ const NAV: NavGroup[] = [
       { to: "/finance/discounts", label: "Discounts & Scholarships", icon: HandCoins, permission: "billing.view" },
       { to: "/finance/expenses", label: "Expenses", icon: ClipboardList, permission: "finance.view" },
       { to: "/finance/reports", label: "Financial Reports", icon: TrendingUp, permission: "financial_reports.view" },
+    ],
+  },
+  {
+    heading: "Operations ERP",
+    items: [
+      { to: "/hr", label: "Human Resources", icon: Briefcase, permission: "hr.view" },
+      { to: "/payroll", label: "Payroll", icon: Banknote, permission: "payroll.view" },
+      { to: "/library", label: "Library", icon: BookMarked, permission: "library.view" },
+      { to: "/transport", label: "Transport", icon: Bus, permission: "transport.view" },
+      { to: "/boarding", label: "Boarding", icon: BedDouble, permission: "boarding.view" },
+      { to: "/inventory", label: "Inventory & Assets", icon: Package, permission: "inventory.view" },
+      { to: "/procurement", label: "Procurement", icon: ShoppingCart, permission: "procurement.view" },
+      { to: "/medical", label: "Clinic & Medical", icon: Stethoscope, permission: "medical.view" },
     ],
   },
   {
