@@ -142,6 +142,29 @@ export const PERMISSIONS = [
   // phase 5 — medical (sensitive)
   "medical.view",
   "medical.manage",
+  // phase 6 — integrations, automation, platform
+  "integrations.view",
+  "integrations.manage",
+  "payments_external.view",
+  "payments_external.manage",
+  "payments_external.reconcile",
+  "communications.view",
+  "communications.manage",
+  "automations.view",
+  "automations.manage",
+  "qr.view",
+  "qr.manage",
+  "biometrics.view",
+  "biometrics.manage",
+  "gps.view",
+  "gps.manage",
+  "ai.view",
+  "data.import",
+  "data.export",
+  "platform.subscriptions.view",
+  "platform.subscriptions.manage",
+  "platform.health.view",
+  "platform.impersonate",
   // platform-scoped (super admin only)
   "platform.dashboard.view",
   "platform.schools.view",
@@ -214,6 +237,16 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "inventory.view", "inventory.manage",
     "procurement.view", "procurement.manage",
     "medical.view", "medical.manage",
+    // Phase 6: integrations, automation, comms, ids, data ops
+    "integrations.view", "integrations.manage",
+    "payments_external.view", "payments_external.manage", "payments_external.reconcile",
+    "communications.view", "communications.manage",
+    "automations.view", "automations.manage",
+    "qr.view", "qr.manage",
+    "biometrics.view", "biometrics.manage",
+    "gps.view", "gps.manage",
+    "ai.view",
+    "data.import", "data.export",
   ],
   principal: [
     "dashboard.view",
@@ -256,6 +289,8 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     // Phase 5: oversight of operations (no payroll figures, no medical detail)
     "hr.view", "leave.view", "leave.approve",
     "library.view", "transport.view", "boarding.view", "inventory.view", "procurement.view",
+    // Phase 6: principal oversight
+    "integrations.view", "communications.view", "automations.view", "ai.view", "payments_external.view",
   ],
   teacher: [
     "dashboard.view",
@@ -302,6 +337,9 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "payroll.view", "payroll.manage",
     "procurement.view", "procurement.manage",
     "inventory.view", "inventory.manage",
+    // Phase 6: bursar runs external payments reconciliation
+    "payments_external.view", "payments_external.manage", "payments_external.reconcile",
+    "communications.view",
   ],
   parent: [
     "dashboard.view", "school.view",
