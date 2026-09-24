@@ -1,5 +1,5 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { mutation, internalMutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requirePermission, getSchoolRecord } from "./session";
 import { recordAudit } from "./audit";
@@ -609,6 +609,100 @@ export const cancelInvoice = mutation({
 /* ================================================================== */
 /* Payments & receipts                                                 */
 /* ================================================================== */
+
+/**
+ * Phase 6: system payment posting used by verified external callbacks
+ * (M-Pesa). Reuses the exact recordPayment engine (payment → ledger →
+ * receipt → invoice status) but runs WITHOUT a user session: the platform
+ * itself is the actor. Idempotency is enforced upstream by the caller via
+ * provider transaction IDs; the reference uniqueness check below is a
+ * second safety net.
+ */
+export async function postSystemPayment(
+  ctx: MutationCtx,
+  args: {
+    schoolId: Id<"schools">;
+    studentId: Id<"students">;
+    invoiceId?: Id<"invoices">;
+    amount: number;
+    method: string;
+    referenceNumber: string;
+  },
+): Promise<{ paymentId: Id<"payments">; paymentNumber: string; receiptNumber: string | null; balanceAfter: number | null; duplicate: boolean }> {
+  const { schoolId, studentId, invoiceId, amount, method, referenceNumber } = args;
+  {
+    const student = await getSchoolRecord(ctx, schoolId, "students", studentId);
+    if (!(amount > 0)) throw new ConvexError("Payment amount must be positive.");
+    // Idempotency net: a confirmed payment with the same provider reference
+    // makes this call a no-op returning the existing payment.
+    const all = await ctx.db.query("payments").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).collect();
+    const existing = all.find((p) => p.referenceNumber === referenceNumber && p.status !== "reversed");
+    if (existing) {
+      return { paymentId: existing._id, paymentNumber: existing.paymentNumber, receiptNumber: null, balanceAfter: null, duplicate: true as const };
+    }
+    let invoice: Doc<"invoices"> | null = null;
+    if (invoiceId) {
+      invoice = await getSchoolRecord(ctx, schoolId, "invoices", invoiceId);
+      if (invoice.status === "cancelled") throw new ConvexError("Cannot pay a cancelled invoice.");
+    }
+    const methods = await ctx.db.query("paymentMethods").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).collect();
+    const methodRow = methods.find((m) => m.name.toLowerCase() === method.trim().toLowerCase());
+    const systemActor = await ctx.db.query("users").withIndex("email", (q) => q.eq("email", "system@schoolcore.internal")).first()
+      ?? (await ctx.db.query("users").withIndex("email", (q) => q.eq("email", "admin@schoolcore.dev")).first());
+    if (!systemActor) throw new ConvexError("System actor user is missing.");
+    const accountId = await ensureStudentAccount(ctx, schoolId, student._id);
+    const paymentNumber = await nextNumber(ctx, schoolId, "PAY");
+    const paymentDate = new Date().toISOString().slice(0, 10);
+    const paymentId = await ctx.db.insert("payments", {
+      schoolId,
+      paymentNumber,
+      studentId: student._id,
+      accountId,
+      invoiceId: invoice?._id,
+      amount,
+      paymentDate,
+      method: methodRow?.name ?? method.trim(),
+      referenceNumber,
+      notes: "Recorded automatically from a verified mobile-money transaction",
+      receivedById: systemActor._id,
+      status: "confirmed",
+      confirmedAt: Date.now(),
+    });
+    const cashCode =
+      methodRow?.integrationKey === "mobile_money" ? ACC.MOBILE_MONEY
+      : methodRow?.integrationKey === "bank_transfer" ? ACC.BANK
+      : ACC.CASH;
+    await postLedgerTransaction(ctx, schoolId, systemActor._id, {
+      transactionType: "payment",
+      date: paymentDate,
+      amount,
+      description: `Payment ${paymentNumber} — ${student.firstName} ${student.lastName} (mobile money)`,
+      studentId: student._id,
+      accountId,
+      invoiceId: invoice?._id,
+      paymentId,
+      lines: [
+        { code: cashCode, direction: "debit", amount },
+        { code: ACC.RECEIVABLE, direction: "credit", amount },
+      ],
+    });
+    const balanceAfter = await studentBalance(ctx, schoolId, accountId);
+    const receiptNumber = await nextNumber(ctx, schoolId, "REC");
+    await ctx.db.insert("receipts", {
+      schoolId, receiptNumber, paymentId, studentId: student._id, accountId,
+      amount, balanceAfter, method: methodRow?.name ?? method.trim(), paymentDate,
+      issuedById: systemActor._id, issuedAt: Date.now(),
+    });
+    if (invoice) await refreshInvoiceStatus(ctx, invoice._id);
+    await recordAudit(ctx, {
+      userId: systemActor._id, schoolId, action: "payment.recorded_external", entityType: "payments",
+      entityId: paymentId,
+      description: `Payment ${paymentNumber} of ${amount} recorded from verified mobile-money transaction ${referenceNumber}`,
+      metadata: { paymentNumber, method: methodRow?.name ?? method, providerRef: referenceNumber },
+    });
+    return { paymentId, paymentNumber, receiptNumber, balanceAfter, duplicate: false as const };
+  }
+}
 
 export const recordPayment = mutation({
   args: {
