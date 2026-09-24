@@ -186,7 +186,10 @@ type SchoolScopedTable =
   | "discounts"
   | "scholarships"
   | "refunds"
-  | "expenses";
+  | "expenses"
+  | "announcements"
+  | "guardianPortalLinks"
+  | "studentPortalLinks";
 
 /**
  * Fetch a school-scoped record by ID and verify it belongs to the caller's

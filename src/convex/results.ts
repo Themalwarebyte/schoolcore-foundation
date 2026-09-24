@@ -4,6 +4,7 @@ import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/s
 import type { Id } from "./_generated/dataModel";
 import { requirePermission, getSchoolRecord } from "./session";
 import { recordAudit } from "./audit";
+import { notifyStudentCircle } from "./notify";
 import { computeSubjectResult, gradeFor, competitionRanks, type ScoreInput } from "./engines/results";
 
 /** Accepts both query and mutation contexts (read-only usage). */
@@ -326,6 +327,16 @@ export const publish = mutation({
       description: `Results published (${eligible.length} records)`,
       metadata: { termId, classSectionId },
     });
+    // Phase 4: notify each affected student's portal circle.
+    const studentIds = [...new Set(eligible.map((r) => r.studentId))];
+    for (const sid of studentIds) {
+      await notifyStudentCircle(ctx, schoolId, sid, {
+        type: "results",
+        title: "New results published",
+        body: "Results have been published for your child. Open the portal to view them.",
+        link: "/portal/results",
+      });
+    }
     return { count: eligible.length };
   },
 });

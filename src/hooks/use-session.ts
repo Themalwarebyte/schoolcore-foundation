@@ -120,7 +120,9 @@ const ROLE_PERMISSIONS: Record<SessionRole, string[]> = {
     "results.view", "results.review", "results.approve", "results.publish",
     "report_cards.view", "report_cards.generate", "report_cards.publish",
     "academic_analytics.view",
-    // Phase 3: finance summaries + approval authorities
+    // Phase 4: portals & communication
+    "announcements.view", "announcements.create", "announcements.publish", "announcements.manage",
+    "notifications.view", "profile.view", "profile.update",
     "finance.view", "billing.view", "receipts.view", "financial_reports.view",
     "discounts.manage", "scholarships.manage", "expenses.approve",
   ],
@@ -137,6 +139,8 @@ const ROLE_PERMISSIONS: Record<SessionRole, string[]> = {
     "results.view",
     "report_cards.view",
     "academic_analytics.view",
+    // Phase 4: communication
+    "announcements.view", "announcements.create", "notifications.view", "profile.view",
   ],
   accountant: [
     "dashboard.view", "school.view", "students.view", "guardians.view",
@@ -149,9 +153,19 @@ const ROLE_PERMISSIONS: Record<SessionRole, string[]> = {
     "discounts.manage", "scholarships.manage",
     "expenses.create",
     "financial_reports.view",
+    // Phase 4
+    "announcements.view", "notifications.view", "profile.view",
   ],
-  parent: ["dashboard.view", "school.view"],
-  student: ["dashboard.view", "school.view"],
+  parent: [
+    // Phase 4: parent portal (read-only views scoped server-side to own children)
+    "dashboard.view", "school.view", "portal.parent", "announcements.view",
+    "notifications.view", "profile.view", "profile.update",
+  ],
+  student: [
+    // Phase 4: student portal (own records only)
+    "dashboard.view", "school.view", "portal.student", "announcements.view",
+    "notifications.view", "profile.view",
+  ],
 };
 
 export function usePermissions() {
