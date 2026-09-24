@@ -1383,6 +1383,22 @@ const schema = defineSchema(
 
     /* ---------------- Phase 5 — HR & departments ---------------- */
 
+    /* ---------------- Phase 6 — observability ---------------- */
+
+    /**
+     * Structured backend/integration/delivery failure events plus reported
+     * frontend errors. Platform-level diagnostics — schoolId optional so
+     * anonymous crashes still surface.
+     */
+    observabilityEvents: defineTable({
+      schoolId: v.optional(v.id("schools")),
+      severity: v.string(), // info | warning | error | critical
+      component: v.string(),
+      message: v.string(),
+      details: v.optional(v.any()),
+      createdAt: v.number(),
+    }).index("by_time", ["createdAt"]),
+
     departments: defineTable({
       schoolId: v.id("schools"),
       name: v.string(),

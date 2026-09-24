@@ -8,7 +8,7 @@
  * they can only create notifications, messages and reminders.
  */
 import { ConvexError, v } from "convex/values";
-import { internalMutation, mutation, query } from "../_generated/server";
+import { internalMutation, mutation, query, type MutationCtx } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
 import { requirePermission } from "../session";
 import { recordAudit } from "../audit";
@@ -103,17 +103,23 @@ export const listRuns = query({
  * Fire an automation event. Every enabled rule matching the trigger runs;
  * conditions evaluate against the numeric context passed by the emitter.
  */
-export const fireEventInternal = internalMutation({
+/**
+ * Shared event-processing core, callable directly from any mutation (e.g.
+ * scheduled jobs) without a FunctionReference round-trip.
+ */
+export async function fireEvent(
+  ctx: MutationCtx,
   args: {
-    schoolId: v.id("schools"),
-    trigger: v.string(),
-    targetKind: v.string(),
-    targetId: v.optional(v.string()),
-    context: v.optional(v.record(v.string(), v.number())),
-    recipientUserIds: v.optional(v.array(v.string())),
+    schoolId: Id<"schools">;
+    trigger: string;
+    targetKind: string;
+    targetId?: string;
+    context?: Record<string, number>;
+    recipientUserIds?: string[];
   },
-  handler: async (ctx, { schoolId, trigger, targetKind, targetId, context, recipientUserIds }) => {
-    const rules = await ctx.db
+): Promise<{ fired: number }> {
+  const { schoolId, trigger, targetKind, targetId, context, recipientUserIds } = args;
+  const rules = await ctx.db
       .query("automations")
       .withIndex("by_school_trigger", (q) => q.eq("schoolId", schoolId).eq("trigger", trigger))
       .collect()
@@ -183,5 +189,17 @@ export const fireEventInternal = internalMutation({
       fired++;
     }
     return { fired };
+}
+
+/** Internal mutation wrapper around fireEvent (callable via runMutation). */
+export const fireEventInternal = internalMutation({
+  args: {
+    schoolId: v.id("schools"),
+    trigger: v.string(),
+    targetKind: v.string(),
+    targetId: v.optional(v.string()),
+    context: v.optional(v.record(v.string(), v.number())),
+    recipientUserIds: v.optional(v.array(v.string())),
   },
+  handler: async (ctx, args) => fireEvent(ctx, args),
 });
