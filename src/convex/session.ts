@@ -156,9 +156,11 @@ export async function requireAnyPermission(
 /* Tenant-safe record access                                           */
 /* ------------------------------------------------------------------ */
 
+/** Every table in the data model, by name. Kept in sync with schema.ts. */
 type SchoolScopedTable =
   | "students"
   | "guardians"
+  | "guardianStudents"
   | "staff"
   | "academicYears"
   | "terms"
@@ -167,7 +169,6 @@ type SchoolScopedTable =
   | "subjects"
   | "teacherAllocations"
   | "enrollments"
-  | "guardianStudents"
   | "timetablePeriods"
   | "rooms"
   | "timetableEntries"
