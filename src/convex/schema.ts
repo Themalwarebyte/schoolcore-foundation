@@ -117,6 +117,31 @@ export const PERMISSIONS = [
   "notifications.view",
   "profile.view",
   "profile.update",
+  // phase 5 — HR & payroll
+  "hr.view",
+  "hr.manage",
+  "employees.create",
+  "employees.update",
+  "contracts.manage",
+  "leave.view",
+  "leave.manage",
+  "leave.approve",
+  "payroll.view",
+  "payroll.manage",
+  // phase 5 — operations
+  "library.view",
+  "library.manage",
+  "transport.view",
+  "transport.manage",
+  "boarding.view",
+  "boarding.manage",
+  "inventory.view",
+  "inventory.manage",
+  "procurement.view",
+  "procurement.manage",
+  // phase 5 — medical (sensitive)
+  "medical.view",
+  "medical.manage",
   // platform-scoped (super admin only)
   "platform.dashboard.view",
   "platform.schools.view",
@@ -178,6 +203,17 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     // Phase 4: portals & communication (admin provisions portal accounts)
     "announcements.view", "announcements.create", "announcements.publish", "announcements.manage",
     "notifications.view", "profile.view", "profile.update",
+    // Phase 5: operations ERP — school admin manages every operational module
+    "hr.view", "hr.manage",
+    "employees.create", "employees.update", "contracts.manage",
+    "leave.view", "leave.manage", "leave.approve",
+    "payroll.view", "payroll.manage",
+    "library.view", "library.manage",
+    "transport.view", "transport.manage",
+    "boarding.view", "boarding.manage",
+    "inventory.view", "inventory.manage",
+    "procurement.view", "procurement.manage",
+    "medical.view", "medical.manage",
   ],
   principal: [
     "dashboard.view",
@@ -217,6 +253,9 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     // Phase 4: communication
     "announcements.view", "announcements.create", "announcements.publish",
     "notifications.view", "profile.view",
+    // Phase 5: oversight of operations (no payroll figures, no medical detail)
+    "hr.view", "leave.view", "leave.approve",
+    "library.view", "transport.view", "boarding.view", "inventory.view", "procurement.view",
   ],
   teacher: [
     "dashboard.view",
@@ -239,6 +278,9 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     // Phase 4: teacher communication — teachers may post announcements to
     // the classes they are allocated to (enforced in the create handler).
     "announcements.view", "announcements.create",
+    // Phase 5: teachers can browse the library catalogue only.
+    // Deliberately NO hr/payroll/medical access (sensitive).
+    "library.view",
   ],
   accountant: [
     "dashboard.view",
@@ -256,6 +298,10 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "discounts.manage", "scholarships.manage",
     "expenses.create",
     "financial_reports.view",
+    // Phase 5: payroll is run by the bursar's office; procurement & stock too
+    "payroll.view", "payroll.manage",
+    "procurement.view", "procurement.manage",
+    "inventory.view", "inventory.manage",
   ],
   parent: [
     "dashboard.view", "school.view",
@@ -361,6 +407,43 @@ export const PORTAL_LINK_STATUSES = ["active", "revoked"] as const;
 export const STATEMENT_ENTRY_TYPES = [
   "invoice", "payment", "discount", "refund", "adjustment",
 ] as const;
+
+/* Phase 5 enums — HR */
+export const CONTRACT_TYPES = ["probation", "fixed_term", "permanent", "internship", "casual"] as const;
+export const CONTRACT_STATUSES = ["draft", "active", "expired", "terminated"] as const;
+export const STAFF_DOCUMENT_TYPES = ["certificate", "identification", "contract", "qualification", "other"] as const;
+export const LEAVE_REQUEST_STATUSES = ["pending", "approved", "rejected", "cancelled"] as const;
+
+/* Phase 5 enums — payroll */
+export const PAYROLL_COMPONENT_TYPES = ["earning", "deduction"] as const;
+export const PAYROLL_COMPONENT_CALC = ["fixed_amount", "percentage_of_basic"] as const;
+export const PAYROLL_RUN_STATUSES = ["draft", "review", "approved", "paid"] as const;
+
+/* Phase 5 enums — library */
+export const LOAN_STATUSES = ["issued", "returned", "overdue", "lost"] as const;
+export const COPY_STATUSES = ["available", "issued", "lost", "retired"] as const;
+
+/* Phase 5 enums — transport */
+export const VEHICLE_STATUSES = ["active", "maintenance", "retired"] as const;
+export const DRIVER_STATUSES = ["active", "inactive"] as const;
+export const TRANSPORT_DIRECTIONS = ["pickup", "dropoff", "both"] as const;
+export const TRANSPORT_ASSIGNMENT_STATUSES = ["active", "ended"] as const;
+
+/* Phase 5 enums — boarding */
+export const BED_STATUSES = ["free", "occupied", "maintenance"] as const;
+export const BOARDING_ALLOCATION_STATUSES = ["active", "ended"] as const;
+
+/* Phase 5 enums — inventory */
+export const ASSET_CONDITIONS = ["new", "good", "fair", "poor", "retired"] as const;
+export const STOCK_MOVEMENT_TYPES = ["received", "issued", "adjustment", "return"] as const;
+
+/* Phase 5 enums — procurement */
+export const PURCHASE_REQUEST_STATUSES = ["draft", "submitted", "approved", "rejected", "ordered", "received", "cancelled"] as const;
+export const PURCHASE_ORDER_STATUSES = ["draft", "submitted", "approved", "received", "cancelled"] as const;
+
+/* Phase 5 enums — medical */
+export const VISIT_DISPOSITIONS = ["sent_home", "sent_to_hospital", "returned_to_class", "referred", "other"] as const;
+export const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "unknown"] as const;
 
 /* ------------------------------------------------------------------ */
 /* Schema                                                              */
@@ -1259,6 +1342,472 @@ const schema = defineSchema(
     })
       .index("by_school", ["schoolId"])
       .index("by_user", ["userId"]),
+
+    /* ---------------- Phase 5 — HR & departments ---------------- */
+
+    departments: defineTable({
+      schoolId: v.id("schools"),
+      name: v.string(),
+      description: v.optional(v.string()),
+      headStaffId: v.optional(v.id("staff")),
+      status: v.string(), // ENTITY_STATUS
+    })
+      .index("by_school", ["schoolId"]),
+
+    /**
+     * HR profile extending the existing Staff record (staff._id is the
+     * identity anchor — no duplicate person records).
+     */
+    employees: defineTable({
+      schoolId: v.id("schools"),
+      staffId: v.id("staff"),
+      departmentId: v.optional(v.id("departments")),
+      jobTitle: v.optional(v.string()),
+      hireDate: v.optional(v.string()), // YYYY-MM-DD
+      supervisorStaffId: v.optional(v.id("staff")),
+      qualifications: v.optional(v.string()),
+      emergencyContactName: v.optional(v.string()),
+      emergencyContactPhone: v.optional(v.string()),
+      emergencyContactRelationship: v.optional(v.string()),
+      notes: v.optional(v.string()),
+      status: v.string(), // ENTITY_STATUS
+      updatedAt: v.optional(v.number()),
+      updatedById: v.optional(v.id("users")),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_staff", ["staffId"])
+      .index("by_department", ["departmentId"]),
+
+    contracts: defineTable({
+      schoolId: v.id("schools"),
+      employeeId: v.id("employees"),
+      staffId: v.id("staff"), // denormalized identity anchor for quick scoping
+      contractNumber: v.string(),
+      contractType: v.string(), // CONTRACT_TYPES
+      startDate: v.string(), // YYYY-MM-DD
+      endDate: v.optional(v.string()),
+      salaryStructureId: v.optional(v.id("salaryStructures")),
+      documentId: v.optional(v.id("files")),
+      status: v.string(), // CONTRACT_STATUSES
+      createdById: v.id("users"),
+      updatedAt: v.optional(v.number()),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_employee", ["employeeId"])
+      .index("by_staff", ["staffId"])
+      .index("by_school_status", ["schoolId", "status"]),
+
+    staffDocuments: defineTable({
+      schoolId: v.id("schools"),
+      staffId: v.id("staff"),
+      employeeId: v.optional(v.id("employees")),
+      documentType: v.string(), // STAFF_DOCUMENT_TYPES
+      title: v.string(),
+      fileId: v.optional(v.id("files")),
+      expiryDate: v.optional(v.string()),
+      uploadedById: v.id("users"),
+      uploadedAt: v.number(),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_staff", ["staffId"])
+      .index("by_employee", ["employeeId"]),
+
+    leaveTypes: defineTable({
+      schoolId: v.id("schools"),
+      name: v.string(),
+      annualDays: v.number(),
+      paid: v.boolean(),
+      requiresApproval: v.boolean(),
+      status: v.string(), // ENTITY_STATUS
+    })
+      .index("by_school", ["schoolId"]),
+
+    leaveRequests: defineTable({
+      schoolId: v.id("schools"),
+      staffId: v.id("staff"),
+      employeeId: v.optional(v.id("employees")),
+      leaveTypeId: v.id("leaveTypes"),
+      startDate: v.string(),
+      endDate: v.string(),
+      days: v.number(),
+      reason: v.optional(v.string()),
+      status: v.string(), // LEAVE_REQUEST_STATUSES
+      requestedById: v.id("users"),
+      decidedById: v.optional(v.id("users")),
+      decidedAt: v.optional(v.number()),
+      decisionNote: v.optional(v.string()),
+      createdAt: v.number(),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_staff", ["staffId"])
+      .index("by_school_status", ["schoolId", "status"]),
+
+    /* ---------------- Phase 5 — payroll ---------------- */
+
+    salaryStructures: defineTable({
+      schoolId: v.id("schools"),
+      name: v.string(),
+      basicSalary: v.number(),
+      status: v.string(), // ENTITY_STATUS
+      createdById: v.id("users"),
+      createdAt: v.number(),
+    })
+      .index("by_school", ["schoolId"]),
+
+    salaryComponents: defineTable({
+      schoolId: v.id("schools"),
+      salaryStructureId: v.id("salaryStructures"),
+      componentType: v.string(), // PAYROLL_COMPONENT_TYPES (earning | deduction)
+      name: v.string(),
+      calculation: v.string(), // PAYROLL_COMPONENT_CALC
+      amount: v.number(), // fixed amount, or percentage value when percentage_of_basic
+      status: v.string(), // ENTITY_STATUS
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_structure", ["salaryStructureId"]),
+
+    payrollRuns: defineTable({
+      schoolId: v.id("schools"),
+      runNumber: v.string(),
+      periodLabel: v.string(), // e.g. "September 2026"
+      periodYear: v.number(),
+      periodMonth: v.number(), // 1-12
+      totalGross: v.number(),
+      totalDeductions: v.number(),
+      totalNet: v.number(),
+      employeeCount: v.number(),
+      status: v.string(), // PAYROLL_RUN_STATUSES
+      createdById: v.id("users"),
+      approvedById: v.optional(v.id("users")),
+      approvedAt: v.optional(v.number()),
+      paidTransactionId: v.optional(v.id("ledgerTransactions")),
+      paidAt: v.optional(v.number()),
+      createdAt: v.number(),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_school_status", ["schoolId", "status"]),
+
+    payslips: defineTable({
+      schoolId: v.id("schools"),
+      payrollRunId: v.id("payrollRuns"),
+      staffId: v.id("staff"),
+      employeeId: v.id("employees"),
+      basicSalary: v.number(),
+      grossPay: v.number(),
+      totalDeductions: v.number(),
+      netPay: v.number(),
+      lines: v.array(
+        v.object({
+          name: v.string(),
+          componentType: v.string(),
+          amount: v.number(),
+        }),
+      ),
+      salaryStructureId: v.optional(v.id("salaryStructures")),
+      contractId: v.optional(v.id("contracts")),
+      generatedAt: v.number(),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_run", ["payrollRunId"])
+      .index("by_staff", ["staffId"]),
+
+    /* ---------------- Phase 5 — library ---------------- */
+
+    libraryCategories: defineTable({
+      schoolId: v.id("schools"),
+      name: v.string(),
+      status: v.string(), // ENTITY_STATUS
+    })
+      .index("by_school", ["schoolId"]),
+
+    books: defineTable({
+      schoolId: v.id("schools"),
+      title: v.string(),
+      author: v.optional(v.string()),
+      isbn: v.optional(v.string()),
+      categoryId: v.optional(v.id("libraryCategories")),
+      publisher: v.optional(v.string()),
+      location: v.optional(v.string()),
+      totalCopies: v.number(),
+      status: v.string(), // ENTITY_STATUS
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_category", ["categoryId"]),
+
+    bookCopies: defineTable({
+      schoolId: v.id("schools"),
+      bookId: v.id("books"),
+      copyNumber: v.string(),
+      status: v.string(), // COPY_STATUSES
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_book", ["bookId"]),
+
+    bookLoans: defineTable({
+      schoolId: v.id("schools"),
+      bookId: v.id("books"),
+      bookCopyId: v.id("bookCopies"),
+      borrowerStaffId: v.optional(v.id("staff")),
+      borrowerStudentId: v.optional(v.id("students")),
+      issuedById: v.id("users"),
+      issueDate: v.string(),
+      dueDate: v.string(),
+      returnedAt: v.optional(v.number()),
+      returnDate: v.optional(v.string()),
+      fineAmount: v.number(),
+      fineWaived: v.optional(v.boolean()),
+      status: v.string(), // LOAN_STATUSES
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_copy", ["bookCopyId"])
+      .index("by_student", ["borrowerStudentId"])
+      .index("by_staff", ["borrowerStaffId"])
+      .index("by_school_status", ["schoolId", "status"]),
+
+    /* ---------------- Phase 5 — transport ---------------- */
+
+    vehicles: defineTable({
+      schoolId: v.id("schools"),
+      registrationNumber: v.string(),
+      vehicleType: v.optional(v.string()),
+      capacity: v.number(),
+      driverId: v.optional(v.id("drivers")),
+      status: v.string(), // VEHICLE_STATUSES
+    })
+      .index("by_school", ["schoolId"]),
+
+    drivers: defineTable({
+      schoolId: v.id("schools"),
+      staffId: v.optional(v.id("staff")), // set when the driver is school staff
+      fullName: v.string(),
+      phone: v.optional(v.string()),
+      licenseNumber: v.optional(v.string()),
+      licenseExpiry: v.optional(v.string()),
+      isExternal: v.boolean(),
+      status: v.string(), // DRIVER_STATUSES
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_staff", ["staffId"]),
+
+    transportRoutes: defineTable({
+      schoolId: v.id("schools"),
+      name: v.string(),
+      vehicleId: v.optional(v.id("vehicles")),
+      status: v.string(), // ENTITY_STATUS
+    })
+      .index("by_school", ["schoolId"]),
+
+    routeStops: defineTable({
+      schoolId: v.id("schools"),
+      routeId: v.id("transportRoutes"),
+      stopName: v.string(),
+      pickupTime: v.string(),
+      displayOrder: v.number(),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_route", ["routeId"]),
+
+    transportAssignments: defineTable({
+      schoolId: v.id("schools"),
+      studentId: v.id("students"),
+      routeId: v.id("transportRoutes"),
+      stopId: v.optional(v.id("routeStops")),
+      vehicleId: v.optional(v.id("vehicles")),
+      direction: v.string(), // TRANSPORT_DIRECTIONS
+      academicYearId: v.optional(v.id("academicYears")),
+      status: v.string(), // TRANSPORT_ASSIGNMENT_STATUSES
+      assignedById: v.optional(v.id("users")),
+      assignedAt: v.number(),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_student", ["studentId"])
+      .index("by_route", ["routeId"]),
+
+    /* ---------------- Phase 5 — boarding ---------------- */
+
+    hostels: defineTable({
+      schoolId: v.id("schools"),
+      name: v.string(),
+      gender: v.optional(v.string()), // GENDERS
+      wardenStaffId: v.optional(v.id("staff")),
+      capacity: v.optional(v.number()),
+      status: v.string(), // ENTITY_STATUS
+    })
+      .index("by_school", ["schoolId"]),
+
+    hostelRooms: defineTable({
+      schoolId: v.id("schools"),
+      hostelId: v.id("hostels"),
+      roomNumber: v.string(),
+      capacity: v.number(),
+      status: v.string(), // ENTITY_STATUS
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_hostel", ["hostelId"]),
+
+    beds: defineTable({
+      schoolId: v.id("schools"),
+      roomId: v.id("hostelRooms"),
+      bedNumber: v.string(),
+      status: v.string(), // BED_STATUSES
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_room", ["roomId"]),
+
+    boardingAllocations: defineTable({
+      schoolId: v.id("schools"),
+      studentId: v.id("students"),
+      hostelId: v.id("hostels"),
+      roomId: v.id("hostelRooms"),
+      bedId: v.id("beds"),
+      academicYearId: v.optional(v.id("academicYears")),
+      startDate: v.string(),
+      endDate: v.optional(v.string()),
+      status: v.string(), // BOARDING_ALLOCATION_STATUSES
+      allocatedById: v.optional(v.id("users")),
+      createdAt: v.number(),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_student", ["studentId"])
+      .index("by_bed", ["bedId"])
+      .index("by_room", ["roomId"]),
+
+    /* ---------------- Phase 5 — inventory & assets ---------------- */
+
+    assets: defineTable({
+      schoolId: v.id("schools"),
+      assetNumber: v.string(),
+      name: v.string(),
+      category: v.string(),
+      purchaseDate: v.optional(v.string()),
+      purchaseValue: v.optional(v.number()),
+      location: v.optional(v.string()),
+      condition: v.string(), // ASSET_CONDITIONS
+      custodianStaffId: v.optional(v.id("staff")),
+      notes: v.optional(v.string()),
+      status: v.string(), // ENTITY_STATUS
+      createdById: v.id("users"),
+      updatedAt: v.optional(v.number()),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_school_number", ["schoolId", "assetNumber"]),
+
+    inventoryItems: defineTable({
+      schoolId: v.id("schools"),
+      name: v.string(),
+      category: v.string(),
+      unit: v.string(),
+      quantity: v.number(),
+      reorderLevel: v.number(),
+      unitCost: v.optional(v.number()),
+      status: v.string(), // ENTITY_STATUS
+      createdById: v.id("users"),
+      updatedAt: v.optional(v.number()),
+    })
+      .index("by_school", ["schoolId"]),
+
+    stockMovements: defineTable({
+      schoolId: v.id("schools"),
+      itemId: v.id("inventoryItems"),
+      movementType: v.string(), // STOCK_MOVEMENT_TYPES
+      quantity: v.number(), // always positive; direction from movementType
+      balanceAfter: v.number(),
+      reference: v.optional(v.string()),
+      issuedToStaffId: v.optional(v.id("staff")),
+      notes: v.optional(v.string()),
+      createdById: v.id("users"),
+      createdAt: v.number(),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_item", ["itemId"]),
+
+    /* ---------------- Phase 5 — procurement ---------------- */
+
+    suppliers: defineTable({
+      schoolId: v.id("schools"),
+      name: v.string(),
+      contactPerson: v.optional(v.string()),
+      phone: v.optional(v.string()),
+      email: v.optional(v.string()),
+      category: v.optional(v.string()),
+      address: v.optional(v.string()),
+      status: v.string(), // ENTITY_STATUS
+    })
+      .index("by_school", ["schoolId"]),
+
+    purchaseRequests: defineTable({
+      schoolId: v.id("schools"),
+      requestNumber: v.string(),
+      supplierId: v.optional(v.id("suppliers")),
+      departmentId: v.optional(v.id("departments")),
+      requestedById: v.id("users"),
+      neededBy: v.optional(v.string()),
+      justification: v.optional(v.string()),
+      estimatedTotal: v.number(),
+      status: v.string(), // PURCHASE_REQUEST_STATUSES
+      decidedById: v.optional(v.id("users")),
+      decidedAt: v.optional(v.number()),
+      decisionNote: v.optional(v.string()),
+      createdAt: v.number(),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_school_status", ["schoolId", "status"]),
+
+    purchaseRequestItems: defineTable({
+      schoolId: v.id("schools"),
+      purchaseRequestId: v.id("purchaseRequests"),
+      description: v.string(),
+      quantity: v.number(),
+      unitCost: v.number(),
+    })
+      .index("by_request", ["purchaseRequestId"])
+      .index("by_school", ["schoolId"]),
+
+    purchaseOrders: defineTable({
+      schoolId: v.id("schools"),
+      orderNumber: v.string(),
+      purchaseRequestId: v.id("purchaseRequests"),
+      supplierId: v.optional(v.id("suppliers")),
+      total: v.number(),
+      orderDate: v.string(),
+      status: v.string(), // PURCHASE_ORDER_STATUSES
+      receivedAt: v.optional(v.number()),
+      createdById: v.id("users"),
+      createdAt: v.number(),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_request", ["purchaseRequestId"]),
+
+    /* ---------------- Phase 5 — clinic / medical (sensitive) ---------------- */
+
+    medicalProfiles: defineTable({
+      schoolId: v.id("schools"),
+      studentId: v.id("students"),
+      bloodGroup: v.optional(v.string()), // BLOOD_GROUPS
+      allergies: v.array(v.string()),
+      conditions: v.array(v.string()),
+      emergencyNotes: v.optional(v.string()),
+      updatedAt: v.optional(v.number()),
+      updatedById: v.optional(v.id("users")),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_student", ["studentId"]),
+
+    clinicVisits: defineTable({
+      schoolId: v.id("schools"),
+      studentId: v.id("students"),
+      visitDate: v.string(),
+      complaint: v.string(),
+      assessment: v.optional(v.string()),
+      treatment: v.optional(v.string()),
+      provider: v.optional(v.string()),
+      disposition: v.optional(v.string()), // VISIT_DISPOSITIONS
+      notes: v.optional(v.string()),
+      recordedById: v.id("users"),
+      createdAt: v.number(),
+    })
+      .index("by_school", ["schoolId"])
+      .index("by_student", ["studentId"]),
 
     files: defineTable({
       schoolId: v.optional(v.id("schools")),
