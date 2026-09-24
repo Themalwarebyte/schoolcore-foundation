@@ -2,7 +2,7 @@ import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx, MutationCtx } from "./_generated/server";
-import { requirePermission, getSchoolRecord } from "./session";
+import { requirePermission, requireAnyPermission, getSchoolRecord } from "./session";
 import { recordAudit } from "./audit";
 
 /* ================================================================== */
@@ -519,7 +519,7 @@ export const parentChildReceipts = query({
 export const portalReportCardDetail = query({
   args: { reportCardId: v.id("reportCards") },
   handler: async (ctx, { reportCardId }) => {
-    const session = await requirePermission(ctx, "portal.parent");
+    const session = await requireAnyPermission(ctx, ["portal.parent", "portal.student"]);
     const schoolId = session.schoolId as Id<"schools">;
     let studentId: Id<"students"> | null = null;
     try {

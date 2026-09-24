@@ -1,6 +1,7 @@
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
+import { Navigate } from "react-router";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/lib/status";
@@ -22,8 +23,13 @@ const CHART_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var
 export default function Dashboard() {
   const overview = useQuery(api.dashboard.overview);
   const activity = useQuery(api.auditLogs.recent, { limit: 8 });
-  const { can } = usePermissions();
+  const { can, role } = usePermissions();
   const navigate = useNavigate();
+
+  // Phase 4: portal roles are redirected to their portals (also enforced in
+  // the school layout, this keeps direct /dashboard visits consistent).
+  if (role === "parent") return <Navigate to="/portal" replace />;
+  if (role === "student") return <Navigate to="/student" replace />;
 
   // Phase 2: teacher home (replaces the admin dashboard for teachers).
   const showTeacherHome = can("attendance.take") && !can("users.view");

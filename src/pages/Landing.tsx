@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   GraduationCap, School, Users, CalendarRange, BookOpen, ShieldCheck,
   ArrowRight, Layers, UserCog, ScrollText, Globe, Search, Grid3X3, Check,
+  Megaphone, Bell,
 } from "lucide-react";
 
 const FEATURES = [
@@ -54,6 +55,8 @@ const ROLE_ROWS = [
   { role: "Principal", scope: "Academic oversight", color: "bg-blue-500" },
   { role: "Teacher", scope: "Classes & subjects", color: "bg-emerald-500" },
   { role: "Accountant", scope: "Finance-ready", color: "bg-amber-500" },
+  { role: "Parent", scope: "Portal: children's records & fees", color: "bg-pink-500" },
+  { role: "Student", scope: "Portal: own results & homework", color: "bg-sky-500" },
 ];
 
 export default function Landing() {
@@ -73,6 +76,7 @@ export default function Landing() {
           <nav className="hidden items-center gap-6 text-sm text-muted-foreground md:flex">
             <a href="#features" className="transition-colors hover:text-foreground">Features</a>
             <a href="#platform" className="transition-colors hover:text-foreground">Platform</a>
+            <a href="#portals" className="transition-colors hover:text-foreground">Portals</a>
             <a href="#roles" className="transition-colors hover:text-foreground">Roles</a>
           </nav>
           <div className="flex items-center gap-2">
@@ -112,15 +116,15 @@ export default function Landing() {
             className="mx-auto max-w-3xl text-center"
           >
             <Badge variant="outline" className="mb-5 gap-1.5 border-primary/30 bg-primary/5 text-primary">
-              <ShieldCheck className="size-3.5" /> Multi-school · Phase 1 foundation
+              <ShieldCheck className="size-3.5" /> Multi-school platform · Portals now live
             </Badge>
             <h1 className="text-balance text-4xl font-semibold tracking-tight sm:text-5xl lg:text-6xl">
               The school management system your whole campus runs on
             </h1>
             <p className="mx-auto mt-5 max-w-2xl text-pretty text-lg text-muted-foreground">
-              Students, guardians, staff, academics and governance — organized in one
-              secure, multi-school platform. Built on a foundation ready for finance,
-              attendance, exams and portals in later phases.
+              Students, staff, academics, finance — and now secure Parent &amp; Student
+              portals with attendance, results, report cards and fee statements, all in
+              one multi-school platform.
             </p>
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Button asChild size="lg" className="h-11 px-6">
@@ -259,6 +263,89 @@ export default function Landing() {
         </div>
       </section>
 
+      {/* Portals */}
+      <section id="portals" className="py-20">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6">
+          <div className="mx-auto max-w-2xl text-center">
+            <Badge variant="outline" className="mb-4 gap-1.5 border-primary/30 bg-primary/5 text-primary">
+              <Bell className="size-3.5" /> Phase 4 · Now live
+            </Badge>
+            <h2 className="text-3xl font-semibold tracking-tight">Portals for parents and students</h2>
+            <p className="mt-3 text-muted-foreground">
+              The same records your staff work with — surfaced securely on mobile-first portals.
+              No duplicated data, no separate logins to maintain.
+            </p>
+          </div>
+          <div className="mt-12 grid gap-4 lg:grid-cols-2">
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, margin: "-60px" }}
+              transition={{ duration: 0.4 }}
+              className="card-soft p-6 transition-shadow hover:shadow-md"
+            >
+              <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <Users className="size-5" />
+              </div>
+              <h3 className="mt-4 text-lg font-semibold">Parent Portal</h3>
+              <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+                One account, every child. Switch between children and see live attendance,
+                published results and report cards, class timetable, assignments, and a full
+                fee statement with downloadable receipts.
+              </p>
+              <ul className="mt-4 space-y-2 text-sm">
+                {[
+                  "Multi-child switcher with per-child dashboards",
+                  "Attendance, results & report cards (PDF)",
+                  "Invoices, payments & receipts",
+                  "School announcements & notifications",
+                ].map((t) => (
+                  <li key={t} className="flex items-start gap-2">
+                    <Check className="mt-0.5 size-4 shrink-0 text-primary" /> {t}
+                  </li>
+                ))}
+              </ul>
+            </motion.div>
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, margin: "-60px" }}
+              transition={{ duration: 0.4, delay: 0.08 }}
+              className="card-soft p-6 transition-shadow hover:shadow-md"
+            >
+              <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <GraduationCap className="size-5" />
+              </div>
+              <h3 className="mt-4 text-lg font-semibold">Student Portal</h3>
+              <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+                Everything a learner needs, scoped strictly to their own record: homework from
+                their teachers, their timetable, attendance, and results once published.
+              </p>
+              <ul className="mt-4 space-y-2 text-sm">
+                {[
+                  "Assignments with due dates",
+                  "Personal timetable",
+                  "Attendance history",
+                  "Published results & report cards",
+                ].map((t) => (
+                  <li key={t} className="flex items-start gap-2">
+                    <Check className="mt-0.5 size-4 shrink-0 text-primary" /> {t}
+                  </li>
+                ))}
+              </ul>
+            </motion.div>
+          </div>
+          <div className="mx-auto mt-10 flex max-w-xl items-start gap-3 rounded-xl border bg-muted/30 p-4">
+            <Megaphone className="mt-0.5 size-5 shrink-0 text-primary" />
+            <p className="text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">Announcements with real targeting.</span>{" "}
+              Schools publish to everyone, parents, students, a grade level or a single class —
+              portal users see exactly what is meant for them, enforced server-side.
+            </p>
+          </div>
+        </div>
+      </section>
+
       {/* Roles */}
       <section id="roles" className="border-t bg-muted/30 py-20">
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
@@ -281,7 +368,7 @@ export default function Landing() {
               ))}
             </div>
             <p className="mt-4 text-center text-xs text-muted-foreground">
-              Plus architecture-ready Parent and Student roles for the portals arriving in later phases.
+              Parent and Student portal accounts are provisioned by the school — no public signup, ever.
             </p>
           </div>
         </div>
@@ -312,7 +399,7 @@ export default function Landing() {
             <GraduationCap className="size-4" />
             <span>SchoolCore — School Management System</span>
           </div>
-          <p>Phase 1 · Foundation &amp; School Core</p>
+          <p>Phases 1–4 · Foundation, Academics, Finance &amp; Portals</p>
         </div>
       </footer>
     </div>

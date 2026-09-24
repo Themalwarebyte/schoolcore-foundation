@@ -1,5 +1,6 @@
 import { SchoolLayout } from "@/components/layouts/school-layout";
 import { PlatformLayout } from "@/components/layouts/platform-layout";
+import { PortalLayout } from "@/components/layouts/portal-layout";
 import '@vly-ai/integrations';
 import { Toaster } from "@/components/ui/sonner";
 import { RequireAuth } from "@/components/RequireAuth";
@@ -52,6 +53,27 @@ const PlatformDashboard = lazy(() => import("./pages/platform/PlatformDashboard.
 const PlatformSchools = lazy(() => import("./pages/platform/Schools.tsx"));
 const PlatformUsers = lazy(() => import("./pages/platform/PlatformUsers.tsx"));
 const PlatformActivity = lazy(() => import("./pages/platform/Activity.tsx"));
+// Phase 4: portals
+const ParentDashboard = lazy(() => import("./pages/portal/ParentDashboard.tsx"));
+const ChildAttendance = lazy(() => import("./pages/portal/ChildViews.tsx").then((m) => ({ default: m.ChildAttendance })));
+const ChildResults = lazy(() => import("./pages/portal/ChildViews.tsx").then((m) => ({ default: m.ChildResults })));
+const ChildReportCards = lazy(() => import("./pages/portal/ChildViews.tsx").then((m) => ({ default: m.ChildReportCards })));
+const ChildAssignments = lazy(() => import("./pages/portal/ChildViews.tsx").then((m) => ({ default: m.ChildAssignments })));
+const ChildTimetable = lazy(() => import("./pages/portal/ChildViews.tsx").then((m) => ({ default: m.ChildTimetable })));
+const ChildFees = lazy(() => import("./pages/portal/ChildViews.tsx").then((m) => ({ default: m.ChildFees })));
+const StudentDashboard = lazy(() => import("./pages/portal/StudentViews.tsx"));
+const StudentAttendance = lazy(() => import("./pages/portal/StudentViews.tsx").then((m) => ({ default: m.StudentAttendance })));
+const StudentResults = lazy(() => import("./pages/portal/StudentViews.tsx").then((m) => ({ default: m.StudentResults })));
+const StudentReportCards = lazy(() => import("./pages/portal/StudentViews.tsx").then((m) => ({ default: m.StudentReportCards })));
+const StudentAssignments = lazy(() => import("./pages/portal/StudentViews.tsx").then((m) => ({ default: m.StudentAssignments })));
+const StudentTimetable = lazy(() => import("./pages/portal/StudentViews.tsx").then((m) => ({ default: m.StudentTimetable })));
+const PortalAnnouncements = lazy(() => import("./pages/portal/PortalShared.tsx").then((m) => ({ default: m.PortalAnnouncements })));
+const PortalNotifications = lazy(() => import("./pages/portal/PortalShared.tsx").then((m) => ({ default: m.PortalNotifications })));
+const PortalProfile = lazy(() => import("./pages/portal/PortalShared.tsx").then((m) => ({ default: m.PortalProfile })));
+const PortalReportCardDetail = lazy(() => import("./pages/portal/PortalShared.tsx").then((m) => ({ default: m.PortalReportCardDetail })));
+// Phase 4: admin communication
+const PortalAccessAdmin = lazy(() => import("./pages/admin/PortalAccess.tsx"));
+const AnnouncementsAdmin = lazy(() => import("./pages/admin/Announcements.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
 // Simple loading fallback for route transitions
@@ -204,6 +226,49 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="/finance/discounts" element={<Discounts />} />
                 <Route path="/finance/expenses" element={<Expenses />} />
                 <Route path="/finance/reports" element={<Reports />} />
+                <Route path="/portal-access" element={<PortalAccessAdmin />} />
+                <Route path="/announcements" element={<AnnouncementsAdmin />} />
+              </Route>
+
+              {/* Parent portal (mobile-first, child-scoped) */}
+              <Route
+                element={
+                  <RequireAuth>
+                    <PortalLayout variant="parent" />
+                  </RequireAuth>
+                }
+              >
+                <Route path="/portal" element={<ParentDashboard />} />
+                <Route path="/portal/:studentId/attendance" element={<ChildAttendance />} />
+                <Route path="/portal/:studentId/results" element={<ChildResults />} />
+                <Route path="/portal/:studentId/report-cards" element={<ChildReportCards />} />
+                <Route path="/portal/:studentId/report-cards/:reportCardId" element={<PortalReportCardDetail />} />
+                <Route path="/portal/:studentId/assignments" element={<ChildAssignments />} />
+                <Route path="/portal/:studentId/timetable" element={<ChildTimetable />} />
+                <Route path="/portal/:studentId/fees" element={<ChildFees />} />
+                <Route path="/portal/announcements" element={<PortalAnnouncements />} />
+                <Route path="/portal/notifications" element={<PortalNotifications />} />
+                <Route path="/portal/profile" element={<PortalProfile />} />
+              </Route>
+
+              {/* Student portal (own records only) */}
+              <Route
+                element={
+                  <RequireAuth>
+                    <PortalLayout variant="student" />
+                  </RequireAuth>
+                }
+              >
+                <Route path="/student" element={<StudentDashboard />} />
+                <Route path="/student/attendance" element={<StudentAttendance />} />
+                <Route path="/student/results" element={<StudentResults />} />
+                <Route path="/student/report-cards" element={<StudentReportCards />} />
+                <Route path="/student/report-cards/:reportCardId" element={<PortalReportCardDetail />} />
+                <Route path="/student/assignments" element={<StudentAssignments />} />
+                <Route path="/student/timetable" element={<StudentTimetable />} />
+                <Route path="/student/announcements" element={<PortalAnnouncements />} />
+                <Route path="/student/notifications" element={<PortalNotifications />} />
+                <Route path="/student/profile" element={<PortalProfile />} />
               </Route>
 
               {/* Platform super-admin area */}

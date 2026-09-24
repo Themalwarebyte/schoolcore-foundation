@@ -16,6 +16,7 @@ import {
   ChevronLeft, LogOut, Loader2, ShieldAlert, ClipboardList,
   CalendarCheck, Clock, FileEdit, ClipboardCheck, SlidersHorizontal, Award,
   FileSpreadsheet, TrendingUp, Bell, Landmark, Wallet, Receipt, HandCoins, PieChart,
+  Megaphone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuthActions } from "@convex-dev/auth/react";
@@ -69,6 +70,7 @@ const NAV: NavGroup[] = [
       { to: "/results", label: "Results", icon: Award, permission: "results.view" },
       { to: "/report-cards", label: "Report Cards", icon: FileSpreadsheet, permission: "report_cards.view" },
       { to: "/analytics", label: "Analytics", icon: TrendingUp, permission: "academic_analytics.view" },
+      { to: "/announcements", label: "Announcements", icon: Megaphone, permission: "announcements.view" },
     ],
   },
   {
@@ -88,6 +90,7 @@ const NAV: NavGroup[] = [
     heading: "Administration",
     items: [
       { to: "/users", label: "Users", icon: UserCog, permission: "users.view" },
+      { to: "/portal-access", label: "Portal Access", icon: UserCog, permission: "users.view" },
       { to: "/roles", label: "Roles & Permissions", icon: KeyRound, permission: "roles.manage" },
       { to: "/audit", label: "Audit Logs", icon: ScrollText, permission: "audit_logs.view" },
     ],
@@ -121,6 +124,10 @@ export function SchoolLayout() {
     );
   }
   if (!isAuthenticated || !session) return <Navigate to="/auth" replace />;
+
+  // Portal roles live in their own mobile-first areas, not the staff shell.
+  if (schoolMembership?.role === "parent") return <Navigate to="/portal" replace />;
+  if (schoolMembership?.role === "student") return <Navigate to="/student" replace />;
 
   // Super admins without a school context go to the platform area.
   if (session.isSuperAdmin && !schoolMembership) {
