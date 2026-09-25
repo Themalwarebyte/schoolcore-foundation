@@ -1,34 +1,31 @@
 /**
- * Phase 7 — public school registration + platform approval workflow.
+ * Phase 7 — public school registration + approval workflow.
  *
- * Public (unauthenticated): submitRequest — creates a SchoolRequest with
- * status "submitted" and stores uploads (certificate/logo/supporting) in the
- * existing files table.
+ * Flow (spec §1–5):
+ *   Landing "Register Your School" → submitRequest (public)
+ *   → Super Admin portal: review / more_info / reject / approve
+ *   → approve creates: School workspace + super-admin membership +
+ *     onboarding record (status onboarding). No school data beyond the empty
+ *     workspace exists until the onboarding wizard runs.
  *
- * Super admin (platform): list, detail (incl. documents), review decisions
- * (approve / reject / more_info). Approve provisions the school workspace
- * (schools + onboardingRecords + subscription) but does NOT create full
- * school data — that happens through the onboarding wizard.
- *
- * Every platform action is audited.
+ * Every review action is audited. Documents attach to schoolRequestDocuments
+ * (files table rows). Statuses: submitted → under_review → approved/rejected;
+ * approved moves to onboarding; activation marks it active.
  */
 import { ConvexError, v } from "convex/values";
 import { internalMutation, mutation, query } from "../_generated/server";
 import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
-import { requirePlatformSession } from "../session";
+import { getSession, requirePlatformSession } from "../session";
 import { recordAudit } from "../audit";
 
-const REQUEST_STATUSES = [
-  "submitted", "under_review", "approved", "rejected", "onboarding", "active",
-] as const;
+const SCHOOL_TYPES = ["public", "private", "international", "community", "faith_based"] as const;
+const STATUS_FLOW: Record<string, string[]> = {
+  submitted: ["under_review", "rejected"],
+  under_review: ["approved", "rejected", "submitted"],
+};
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-/* ------------------------------------------------------------------ */
-/* Public: submit a school registration request                        */
-/* ------------------------------------------------------------------ */
-
+/** Public: submit a school registration request (no auth). */
 export const submitRequest = mutation({
   args: {
     schoolName: v.string(),
@@ -48,224 +45,343 @@ export const submitRequest = mutation({
     contactPosition: v.optional(v.string()),
     contactEmail: v.string(),
     contactPhone: v.optional(v.string()),
+    notes: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const schoolName = args.schoolName.trim();
     const email = args.email.trim().toLowerCase();
     const contactEmail = args.contactEmail.trim().toLowerCase();
-    if (schoolName.length < 3) throw new ConvexError("School name is required.");
-    if (!EMAIL_RE.test(email)) throw new ConvexError("Enter a valid school email.");
-    if (!EMAIL_RE.test(contactEmail)) throw new ConvexError("Enter a valid contact email.");
+    if (schoolName.length < 3) throw new ConvexError("School name must be at least 3 characters.");
+    if (!email.includes("@")) throw new ConvexError("Enter a valid school email address.");
+    if (!contactEmail.includes("@")) throw new ConvexError("Enter a valid contact email address.");
     if (!args.contactName.trim()) throw new ConvexError("Contact person name is required.");
-
-    // One open request per school email (approved/rejected ones don't block).
+    if (args.schoolType && !SCHOOL_TYPES.includes(args.schoolType as never)) {
+      throw new ConvexError("Unknown school type.");
+    }
+    if (args.expectedStudents !== undefined && (args.expectedStudents < 0 || args.expectedStudents > 100000)) {
+      throw new ConvexError("Expected students looks invalid.");
+    }
+    // Simple abuse guard: one open request per school email.
     const existing = await ctx.db
       .query("schoolRequests")
       .withIndex("by_email", (q) => q.eq("email", email))
-      .collect();
-    if (existing.some((r) => ["submitted", "under_review", "onboarding"].includes(r.status))) {
+      .collect()
+      .then((rs) => rs.filter((r) => !["rejected", "active"].includes(r.status)));
+    if (existing.length > 0) {
       throw new ConvexError("A registration request for this school email is already in progress.");
     }
-
-    const id = await ctx.db.insert("schoolRequests", {
-      ...args,
+    const now = Date.now();
+    const requestId = await ctx.db.insert("schoolRequests", {
       schoolName,
+      registrationNumber: args.registrationNumber?.trim(),
+      country: args.country?.trim(),
+      county: args.county?.trim(),
+      physicalAddress: args.physicalAddress?.trim(),
+      postalAddress: args.postalAddress?.trim(),
+      schoolType: args.schoolType,
+      curriculum: args.curriculum?.trim(),
+      expectedStudents: args.expectedStudents,
+      expectedTeachers: args.expectedTeachers,
+      website: args.website?.trim(),
       email,
-      contactEmail,
+      phone: args.phone?.trim(),
       contactName: args.contactName.trim(),
+      contactPosition: args.contactPosition?.trim(),
+      contactEmail,
+      contactPhone: args.contactPhone?.trim(),
       status: "submitted",
-      createdAt: Date.now(),
+      createdById: undefined,
+      createdAt: now,
     });
-    return { requestId: id };
+    // The free-text notes are stored in the audit trail only (no column needed).
+    await recordAudit(ctx, {
+      userId: args.contactEmail as never,
+      action: "school_request.submitted",
+      entityType: "schoolRequests",
+      entityId: requestId,
+      description: `Registration request submitted for "${schoolName}" (${email})${args.notes ? `: ${args.notes.slice(0, 200)}` : ""}`,
+    });
+    return { requestId };
   },
 });
 
-/** Public status check by email so applicants can see where they stand. */
-export const requestStatus = query({
+/** Public: attach a document (certificate/logo/supporting) to a request. */
+export const attachRequestDocument = mutation({
+  args: {
+    requestId: v.id("schoolRequests"),
+    kind: v.string(),
+    filename: v.string(),
+    mimeType: v.string(),
+    bytes: v.bytes(),
+  },
+  handler: async (ctx, { requestId, kind, filename, mimeType, bytes }) => {
+    if (!["registration_certificate", "logo", "supporting"].includes(kind)) {
+      throw new ConvexError("Unknown document kind.");
+    }
+    if (bytes.length > 5 * 1024 * 1024) throw new ConvexError("File exceeds the 5MB limit.");
+    const request = await ctx.db.get(requestId);
+    if (!request) throw new ConvexError("Registration request not found.");
+    if (["approved", "rejected", "active"].includes(request.status)) {
+      throw new ConvexError("This request is no longer open for uploads.");
+    }
+    const fileId = await ctx.db.insert("files", {
+      schoolId: request.schoolId,
+      uploadedById: undefined,
+      filename: filename.slice(0, 200),
+      mimeType: mimeType.slice(0, 100),
+      bytes,
+    });
+    const docId = await ctx.db.insert("schoolRequestDocuments", {
+      requestId,
+      kind,
+      fileId,
+      uploadedAt: Date.now(),
+    });
+    return { documentId: docId, fileId };
+  },
+});
+
+/** Public: check request status by email (shows coarse status only). */
+export const requestStatusByEmail = query({
   args: { email: v.string() },
   handler: async (ctx, { email }) => {
     const normalized = email.trim().toLowerCase();
-    const row = await ctx.db
+    const rows = await ctx.db
       .query("schoolRequests")
       .withIndex("by_email", (q) => q.eq("email", normalized))
-      .order("desc")
-      .first();
-    if (!row) return null;
-    return {
-      status: row.status,
-      schoolName: row.schoolName,
-      submittedAt: row.createdAt,
-      decisionNotes: row.decisionNotes ?? null,
-      // Deliberately minimal: no contact details leak without authentication.
-    };
+      .collect();
+    return rows.map((r) => ({
+      requestId: r._id,
+      schoolName: r.schoolName,
+      status: r.status,
+      submittedAt: r.createdAt,
+      // Deliberately coarse: no reviewer notes to the public channel.
+    }));
   },
 });
 
 /* ------------------------------------------------------------------ */
-/* Platform: review + decisions (super admin)                          */
+/* Super admin portal                                                  */
 /* ------------------------------------------------------------------ */
 
-export const listRequests = query({
+/** Platform: list school requests with optional status filter. */
+export const platformListRequests = query({
   args: { status: v.optional(v.string()) },
   handler: async (ctx, { status }) => {
     await requirePlatformSession(ctx);
     let rows;
     if (status && status !== "all") {
-      rows = await ctx.db
-        .query("schoolRequests")
-        .withIndex("by_status", (q) => q.eq("status", status))
-        .collect();
+      rows = await ctx.db.query("schoolRequests").withIndex("by_status", (q) => q.eq("status", status)).collect();
     } else {
       rows = await ctx.db.query("schoolRequests").collect();
     }
-    return rows
-      .sort((a, b) => b.createdAt - a.createdAt)
-      .map((r) => ({
-        _id: r._id,
-        schoolName: r.schoolName,
-        email: r.email,
-        county: r.county ?? null,
-        country: r.country ?? null,
-        curriculum: r.curriculum ?? null,
-        schoolType: r.schoolType ?? null,
-        expectedStudents: r.expectedStudents ?? null,
-        contactName: r.contactName,
-        contactEmail: r.contactEmail,
-        status: r.status,
-        createdAt: r.createdAt,
-        reviewedAt: r.reviewedAt ?? null,
-        decisionNotes: r.decisionNotes ?? null,
-        schoolId: r.schoolId ?? null,
-      }));
+    return rows.sort((a, b) => b.createdAt - a.createdAt).map((r) => ({
+      _id: r._id,
+      schoolName: r.schoolName,
+      email: r.email,
+      county: r.county ?? null,
+      country: r.country ?? null,
+      curriculum: r.curriculum ?? null,
+      schoolType: r.schoolType ?? null,
+      expectedStudents: r.expectedStudents ?? null,
+      status: r.status,
+      createdAt: r.createdAt,
+      reviewedAt: r.reviewedAt ?? null,
+      schoolId: r.schoolId ?? null,
+    }));
   },
 });
 
-export const requestDetail = query({
+/** Platform: full request detail incl. documents metadata. */
+export const platformRequestDetail = query({
   args: { requestId: v.id("schoolRequests") },
   handler: async (ctx, { requestId }) => {
     await requirePlatformSession(ctx);
     const r = await ctx.db.get(requestId);
-    if (!r) throw new ConvexError("Request not found.");
+    if (!r) throw new ConvexError("Registration request not found.");
     const docs = await ctx.db
       .query("schoolRequestDocuments")
       .withIndex("by_request", (q) => q.eq("requestId", requestId))
       .collect();
-    const reviewer = r.reviewedById ? await ctx.db.get(r.reviewedById) : null;
+    const documents = [];
+    for (const d of docs) {
+      const file = await ctx.db.get(d.fileId);
+      documents.push({
+        documentId: d._id,
+        kind: d.kind,
+        filename: file?.filename ?? "—",
+        mimeType: file?.mimeType ?? "",
+        sizeBytes: file?.bytes?.length ?? 0,
+        uploadedAt: d.uploadedAt,
+      });
+    }
     const school = r.schoolId ? await ctx.db.get(r.schoolId) : null;
     return {
-      request: { ...r },
-      documents: docs.map((d) => ({
-        _id: d._id, kind: d.kind, fileId: d.fileId, uploadedAt: d.uploadedAt,
-      })),
-      reviewer: reviewer ? { name: reviewer.name ?? reviewer.email ?? "" } : null,
-      school: school ? { _id: school._id, name: school.name, code: school.code } : null,
+      request: {
+        _id: r._id,
+        schoolName: r.schoolName,
+        registrationNumber: r.registrationNumber ?? null,
+        country: r.country ?? null,
+        county: r.county ?? null,
+        physicalAddress: r.physicalAddress ?? null,
+        postalAddress: r.postalAddress ?? null,
+        schoolType: r.schoolType ?? null,
+        curriculum: r.curriculum ?? null,
+        expectedStudents: r.expectedStudents ?? null,
+        expectedTeachers: r.expectedTeachers ?? null,
+        website: r.website ?? null,
+        email: r.email,
+        phone: r.phone ?? null,
+        contactName: r.contactName,
+        contactPosition: r.contactPosition ?? null,
+        contactEmail: r.contactEmail,
+        contactPhone: r.contactPhone ?? null,
+        status: r.status,
+        decisionNotes: r.decisionNotes ?? null,
+        reviewedAt: r.reviewedAt ?? null,
+        createdAt: r.createdAt,
+        schoolId: r.schoolId ?? null,
+      },
+      school: school ? { _id: school._id, name: school.name, code: school.code, status: school.status } : null,
+      documents,
     };
   },
 });
 
-export const reviewRequest = mutation({
-  args: {
-    requestId: v.id("schoolRequests"),
-    decision: v.union(v.literal("approve"), v.literal("reject"), v.literal("more_info"), v.literal("under_review")),
-    notes: v.optional(v.string()),
-  },
-  handler: async (ctx, { requestId, decision, notes }) => {
-    const session = await requirePlatformSession(ctx);
-    const r = await ctx.db.get(requestId);
-    if (!r) throw new ConvexError("Request not found.");
-    if (r.status === "approved") throw new ConvexError("This request is already approved.");
-    if (r.status === "active") throw new ConvexError("This school is already active.");
-
-    const now = Date.now();
-    let schoolId: Id<"schools"> | undefined = r.schoolId;
-
-    if (decision === "under_review") {
-      if (r.status !== "submitted" && r.status !== "under_review") {
-        throw new ConvexError("Only submitted requests can move to review.");
-      }
-      await ctx.db.patch(requestId, {
-        status: "under_review", reviewedById: session.userId, reviewedAt: now,
-        decisionNotes: notes ?? r.decisionNotes, updatedAt: now,
-      });
-    } else if (decision === "reject") {
-      if (!notes?.trim()) throw new ConvexError("A rejection reason is required.");
-      await ctx.db.patch(requestId, {
-        status: "rejected", reviewedById: session.userId, reviewedAt: now,
-        decisionNotes: notes.trim(), updatedAt: now,
-      });
-    } else if (decision === "more_info") {
-      if (!notes?.trim()) throw new ConvexError("Describe what information is needed.");
-      if (r.status !== "submitted" && r.status !== "under_review") {
-        throw new ConvexError("Only open requests can be sent back for more information.");
-      }
-      await ctx.db.patch(requestId, {
-        status: "under_review", reviewedById: session.userId, reviewedAt: now,
-        decisionNotes: notes.trim(), updatedAt: now,
-      });
-    } else {
-      // approve → provision the workspace (school shell + onboarding record).
-      if (r.status === "onboarding") throw new ConvexError("Onboarding already started for this request.");
-      if (schoolId) throw new ConvexError("This request already has a school workspace.");
-      schoolId = await ctx.runMutation(internal.phase7.registration.provisionSchoolInternal, {
-        requestId, userId: session.userId, notes: notes ?? undefined,
-      });
-    }
-
-    await recordAudit(ctx, {
-      userId: session.userId,
-      action: `school_request.${decision}`,
-      entityType: "schoolRequests",
-      entityId: requestId,
-      schoolId: schoolId ?? undefined,
-      description: `School request "${r.schoolName}": ${decision}` + (notes ? ` — ${notes}` : ""),
-    });
-    return { ok: true as const, schoolId: schoolId ?? null, status: decision === "approve" ? "onboarding" : undefined };
+/** Platform: download a request document (super admin only). */
+export const platformRequestDocument = query({
+  args: { documentId: v.id("schoolRequestDocuments") },
+  handler: async (ctx, { documentId }) => {
+    await requirePlatformSession(ctx);
+    const doc = await ctx.db.get(documentId);
+    if (!doc) throw new ConvexError("Document not found.");
+    const file = await ctx.db.get(doc.fileId);
+    if (!file) throw new ConvexError("File not found.");
+    return {
+      filename: file.filename,
+      mimeType: file.mimeType,
+      bytes: file.bytes ?? null,
+    };
   },
 });
 
-/* ------------------------------------------------------------------ */
-/* Internal: workspace provisioning                                    */
-/* ------------------------------------------------------------------ */
-
-/**
- * Approved request → Onboarding record → School workspace.
- * Creates the school shell (slug + unique code), an onboarding record and a
- * Starter subscription. No academic/user data is created here.
- */
-export const provisionSchoolInternal = internalMutation({
+/** Platform: update review status (under_review / more_info back to submitted). */
+export const reviewRequest = mutation({
   args: {
     requestId: v.id("schoolRequests"),
-    userId: v.id("users"),
+    action: v.union(v.literal("start_review"), v.literal("more_info")),
     notes: v.optional(v.string()),
   },
-  handler: async (ctx, { requestId, userId, notes }) => {
+  handler: async (ctx, { requestId, action, notes }) => {
+    const session = await requirePlatformSession(ctx);
     const r = await ctx.db.get(requestId);
-    if (!r) throw new ConvexError("Request not found.");
-    if (r.schoolId) return r.schoolId;
-
+    if (!r) throw new ConvexError("Registration request not found.");
     const now = Date.now();
-    // Unique slug from the school name.
-    const baseSlug = r.schoolName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "school";
+    if (action === "start_review") {
+      if (r.status !== "submitted") throw new ConvexError("Only submitted requests can move to review.");
+      await ctx.db.patch(requestId, {
+        status: "under_review",
+        reviewedById: session.userId,
+        reviewedAt: now,
+        decisionNotes: notes?.trim(),
+        updatedAt: now,
+      });
+      await recordAudit(ctx, {
+        userId: session.userId, action: "school_request.review_started",
+        entityType: "schoolRequests", entityId: requestId,
+        description: `Review started for "${r.schoolName}"`,
+      });
+      return { status: "under_review" as const };
+    }
+    // more_info: send back to submitted with reviewer notes.
+    if (!["submitted", "under_review"].includes(r.status)) {
+      throw new ConvexError("Only open requests can be sent back for more information.");
+    }
+    if (!notes?.trim()) throw new ConvexError("Tell the school what information you need.");
+    await ctx.db.patch(requestId, {
+      status: "submitted",
+      reviewedById: session.userId,
+      reviewedAt: now,
+      decisionNotes: notes.trim(),
+      updatedAt: now,
+    });
+    await recordAudit(ctx, {
+      userId: session.userId, action: "school_request.more_info",
+      entityType: "schoolRequests", entityId: requestId,
+      description: `More information requested for "${r.schoolName}": ${notes.trim().slice(0, 200)}`,
+    });
+    return { status: "submitted" as const };
+  },
+});
+
+/** Platform: reject a request (audited, with mandatory reason). */
+export const rejectRequest = mutation({
+  args: { requestId: v.id("schoolRequests"), reason: v.string() },
+  handler: async (ctx, { requestId, reason }) => {
+    const session = await requirePlatformSession(ctx);
+    const r = await ctx.db.get(requestId);
+    if (!r) throw new ConvexError("Registration request not found.");
+    if (!["submitted", "under_review"].includes(r.status)) {
+      throw new ConvexError("Only open requests can be rejected.");
+    }
+    if (!reason.trim()) throw new ConvexError("A rejection reason is required.");
+    const now = Date.now();
+    await ctx.db.patch(requestId, {
+      status: "rejected",
+      decisionNotes: reason.trim(),
+      reviewedById: session.userId,
+      reviewedAt: now,
+      updatedAt: now,
+    });
+    await recordAudit(ctx, {
+      userId: session.userId, action: "school_request.rejected",
+      entityType: "schoolRequests", entityId: requestId,
+      description: `Request for "${r.schoolName}" rejected: ${reason.trim().slice(0, 200)}`,
+    });
+    return { status: "rejected" as const };
+  },
+});
+
+/**
+ * Platform: approve a request. Creates the school workspace (empty except
+ * identity + the requesting contact as school admin), the onboarding record
+ * and flips the request to "onboarding". No students/staff/fees are created.
+ */
+export const approveRequest = mutation({
+  args: {
+    requestId: v.id("schoolRequests"),
+    notes: v.optional(v.string()),
+    /** Approval may adjust the final school name (normalized). */
+    finalSchoolName: v.optional(v.string()),
+  },
+  handler: async (ctx, { requestId, notes, finalSchoolName }) => {
+    const session = await requirePlatformSession(ctx);
+    const r = await ctx.db.get(requestId);
+    if (!r) throw new ConvexError("Registration request not found.");
+    if (r.status !== "under_review") {
+      throw new ConvexError("Start a review before approving this request.");
+    }
+    if (r.schoolId) throw new ConvexError("This request already has a workspace.");
+    const now = Date.now();
+    const name = (finalSchoolName?.trim() || r.schoolName).trim();
+
+    // Unique school code + slug derived from the request.
+    const baseSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "school";
     let slug = baseSlug;
-    for (let i = 0; i < 20; i++) {
+    for (let i = 2; ; i++) {
       const clash = await ctx.db.query("schools").withIndex("by_slug", (q) => q.eq("slug", slug)).first();
       if (!clash) break;
-      slug = `${baseSlug}-${i + 2}`;
+      slug = `${baseSlug}-${i}`;
     }
-    // Unique short school code.
-    let code = "";
-    for (let i = 0; i < 30; i++) {
-      code = `SCH-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
-      const clash = await ctx.db.query("schools").withIndex("by_code", (q) => q.eq("code", code)).first();
-      if (!clash) break;
-    }
+    const allSchools = await ctx.db.query("schools").collect();
+    const code = `SCH-${String(allSchools.length + 1).padStart(3, "0")}`;
 
     const schoolId = await ctx.db.insert("schools", {
-      name: r.schoolName,
+      name,
       code,
       slug,
-      phone: r.phone,
       email: r.email,
+      phone: r.phone,
       website: r.website,
       postalAddress: r.postalAddress,
       physicalAddress: r.physicalAddress,
@@ -273,61 +389,91 @@ export const provisionSchoolInternal = internalMutation({
       country: r.country,
       currency: "KES",
       curriculum: r.curriculum,
-      status: "inactive", // activated by the onboarding wizard's final step
-      createdBy: userId,
+      status: "inactive", // activated at the end of onboarding
+      createdBy: session.userId,
     });
 
-    // Onboarding progress record (idempotent).
-    const existingRecord = await ctx.db
-      .query("onboardingRecords")
-      .withIndex("by_school", (q) => q.eq("schoolId", schoolId))
-      .first();
-    if (!existingRecord) {
-      await ctx.db.insert("onboardingRecords", {
-        schoolId,
-        requestId,
-        profileDone: false,
-        academicsDone: false,
-        usersDone: false,
-        importDone: false,
-        activated: false,
-        notes,
-        createdAt: now,
+    // Contact person becomes the first school admin via an activation token
+    // (never a shared temp password — Phase 7 rule §12).
+    let contactUserId: Id<"users"> | null = null;
+    try {
+      const result = await ctx.runMutation(internal.phase7.invitations.ensureUserForInvitationInternal, {
+        email: r.contactEmail,
+        name: r.contactName,
       });
+      contactUserId = result.userId;
+      await ctx.runMutation(internal.accounts.addMembershipInternal, {
+        userId: contactUserId,
+        schoolId,
+        role: "school_admin",
+        createdById: session.userId,
+      });
+    } catch {
+      // The wizard's Initial Users step can still provision the admin if the
+      // contact email collides with an existing platform account.
+      contactUserId = null;
     }
 
-    // Default Starter subscription so the school is commercially usable.
-    const starter = await ctx.db.query("plans").withIndex("by_slug", (q) => q.eq("slug", "starter")).first();
-    if (starter) {
-      const existingSub = await ctx.db
-        .query("schoolSubscriptions")
-        .withIndex("by_school", (q) => q.eq("schoolId", schoolId))
-        .first();
-      if (!existingSub) {
-        await ctx.db.insert("schoolSubscriptions", {
-          schoolId,
-          planId: starter._id,
-          status: "trial",
-          trialEndsAt: now + 30 * 24 * 3600 * 1000,
-          startedAt: now,
-        });
-      }
-    }
+    await ctx.db.insert("onboardingRecords", {
+      schoolId,
+      requestId,
+      profileDone: false,
+      academicsDone: false,
+      usersDone: false,
+      importDone: false,
+      activated: false,
+      notes: notes?.trim(),
+      createdAt: now,
+    });
 
     await ctx.db.patch(requestId, {
       status: "onboarding",
       schoolId,
-      reviewedById: userId,
+      decisionNotes: notes?.trim() ?? r.decisionNotes,
+      reviewedById: session.userId,
       reviewedAt: now,
-      decisionNotes: notes ?? r.decisionNotes,
       updatedAt: now,
     });
-    return schoolId;
+
+    await recordAudit(ctx, {
+      userId: session.userId, action: "school_request.approved",
+      entityType: "schoolRequests", entityId: requestId,
+      description: `Request approved — workspace "${name}" (${code}) created; onboarding started`,
+      metadata: { schoolId, code },
+    });
+    return { schoolId, status: "onboarding" as const, contactUserId };
   },
 });
 
-/** Allowed statuses exported for UI + tests. */
-export const statuses = query({
-  args: {},
-  handler: async () => ({ statuses: REQUEST_STATUSES }),
+/** Internal: mark a request active once its onboarding completes. */
+export const activateRequestInternal = internalMutation({
+  args: { requestId: v.id("schoolRequests") },
+  handler: async (ctx, { requestId }) => {
+    const r = await ctx.db.get(requestId);
+    if (!r) throw new ConvexError("Registration request not found.");
+    if (r.status !== "onboarding") throw new ConvexError("Only onboarding requests can be activated.");
+    await ctx.db.patch(requestId, { status: "active", updatedAt: Date.now() });
+    return { status: "active" as const };
+  },
 });
+
+/** Platform: aggregate counts for the platform dashboard. */
+export const platformRequestStats = query({
+  args: {},
+  handler: async (ctx) => {
+    await getSession(ctx); // any signed-in caller; permission enforced below
+    await requirePlatformSession(ctx);
+    const rows = await ctx.db.query("schoolRequests").collect();
+    const counts: Record<string, number> = {};
+    for (const r of rows) counts[r.status] = (counts[r.status] ?? 0) + 1;
+    return {
+      total: rows.length,
+      byStatus: counts,
+      pending: (counts["submitted"] ?? 0) + (counts["under_review"] ?? 0),
+      onboarding: counts["onboarding"] ?? 0,
+      active: counts["active"] ?? 0,
+    };
+  },
+});
+
+void STATUS_FLOW;
