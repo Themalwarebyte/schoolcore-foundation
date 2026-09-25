@@ -7,11 +7,18 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/lib/status";
 import {
   School, GraduationCap, UserRound, Activity as ActivityIcon, ArrowRight,
+  AlertTriangle, ListChecks, Inbox,
 } from "lucide-react";
 
 export default function PlatformDashboard() {
   const stats = useQuery(api.schools.platformStats);
   const activity = useQuery(api.platform.platformActivity, { limit: 8 });
+  const requests = useQuery(api.phase7.registration.platformRequestStats, {});
+  const onboarding = useQuery(api.phase7.onboarding.platformList, {});
+
+  const needsAttention = (onboarding ?? []).filter(
+    (r) => !r.activated && r.schoolStatus === "active",
+  );
 
   const cards = [
     { label: "Total schools", value: stats?.totalSchools, icon: School, to: "/platform/schools" },
@@ -44,6 +51,81 @@ export default function PlatformDashboard() {
         ))}
       </div>
 
+      {/* Needs attention — work waiting on the platform admin */}
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        <Card className="card-soft border-amber-200 dark:border-amber-900">
+          <CardHeader className="flex-row items-center justify-between space-y-0">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <AlertTriangle className="size-4 text-amber-500" /> Needs attention
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {stats === undefined || requests === undefined ? (
+              <div className="space-y-3">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
+            ) : (
+              <>
+                <Link to="/platform/school-requests" className="flex items-center justify-between rounded-lg border p-3 text-sm transition-colors hover:bg-muted/50">
+                  <span>
+                    <span className="font-semibold">{requests.pending}</span> registration request{requests.pending === 1 ? "" : "s"} to review
+                  </span>
+                  <ArrowRight className="size-4 text-muted-foreground" />
+                </Link>
+                <Link to="/platform/schools" className="flex items-center justify-between rounded-lg border p-3 text-sm transition-colors hover:bg-muted/50">
+                  <span>
+                    <span className="font-semibold">{onboarding?.length ?? 0}</span> school{(onboarding?.length ?? 0) === 1 ? "" : "s"} onboarded or onboarding
+                  </span>
+                  <ArrowRight className="size-4 text-muted-foreground" />
+                </Link>
+                <Link to="/platform/schools" className="flex items-center justify-between rounded-lg border p-3 text-sm transition-colors hover:bg-muted/50">
+                  <span>
+                    <span className="font-semibold">{needsAttention.length}</span> active school{needsAttention.length === 1 ? "" : "s"} with setup incomplete
+                  </span>
+                  <ArrowRight className="size-4 text-muted-foreground" />
+                </Link>
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="card-soft">
+          <CardHeader className="flex-row items-center justify-between space-y-0">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <ListChecks className="size-4" /> Setup progress by school
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {onboarding === undefined ? (
+              <div className="space-y-3">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
+            ) : onboarding.length === 0 ? (
+              <div className="py-8 text-center">
+                <Inbox className="mx-auto size-8 text-muted-foreground/60" />
+                <p className="mt-2 text-sm text-muted-foreground">
+                  No schools onboarded yet. Approve a registration request to get started.
+                </p>
+              </div>
+            ) : (
+              <div className="divide-y">
+                {onboarding.slice(0, 6).map((r) => {
+                  const steps = [r.profileDone, r.academicsDone, r.usersDone, r.importDone];
+                  const pct = Math.round((steps.filter(Boolean).length / steps.length) * 100);
+                  return (
+                    <div key={r._id} className="flex items-center justify-between gap-3 py-2.5">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">{r.schoolName}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {r.activated ? "Activated" : `${pct}% set up`}
+                        </p>
+                      </div>
+                      <StatusBadge status={r.schoolStatus ?? "inactive"} />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         <Card className="card-soft">
           <CardHeader className="flex-row items-center justify-between space-y-0">
@@ -54,7 +136,10 @@ export default function PlatformDashboard() {
             {!stats ? (
               <div className="space-y-3">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
             ) : stats.recentSchools.length === 0 ? (
-              <p className="py-8 text-center text-sm text-muted-foreground">No schools yet.</p>
+              <div className="py-8 text-center">
+                <School className="mx-auto size-8 text-muted-foreground/60" />
+                <p className="mt-2 text-sm text-muted-foreground">No schools yet — new registrations will appear here.</p>
+              </div>
             ) : (
               <div className="divide-y">
                 {stats.recentSchools.map((s) => (

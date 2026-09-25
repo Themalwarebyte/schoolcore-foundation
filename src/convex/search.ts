@@ -33,18 +33,58 @@ export const globalSearch = query({
         .query("students")
         .withIndex("by_school", (q) => q.eq("schoolId", schoolId))
         .collect();
-      for (const s of students) {
+      const matched = students.filter((s) => {
         const full = `${s.firstName} ${s.middleName ?? ""} ${s.lastName}`.toLowerCase();
-        if (full.includes(needle) || s.admissionNumber.toLowerCase().includes(needle)) {
-          hits.push({
-            type: "student",
-            id: s._id,
-            title: `${s.firstName} ${s.lastName}`,
-            subtitle: `Student · ${s.admissionNumber}`,
-            href: `/students/${s._id}`,
-          });
-          if (hits.length >= max) break;
+        return full.includes(needle) || s.admissionNumber.toLowerCase().includes(needle);
+      }).slice(0, max);
+      // Enrich matched students with their current class label
+      // ("Grade 7 Blue · Adm 12345") via active enrollments, resolved lazily
+      // only for actual matches.
+      const studentIds = new Set(matched.map((s) => s._id));
+      const classLabels = new Map<string, string>();
+      if (studentIds.size > 0) {
+        const year = await ctx.db
+          .query("academicYears")
+          .withIndex("by_school", (q) => q.eq("schoolId", schoolId))
+          .filter((q) => q.eq(q.field("isCurrent"), true))
+          .first();
+        if (year) {
+          const enrollments = await ctx.db
+            .query("enrollments")
+            .withIndex("by_year", (q) => q.eq("academicYearId", year._id))
+            .collect();
+          const activeByStudent = new Map<string, Id<"classSections">>();
+          for (const e of enrollments) {
+            if (e.status === "active" && studentIds.has(e.studentId)) {
+              activeByStudent.set(e.studentId, e.classSectionId);
+            }
+          }
+          const sectionIds = [...new Set(activeByStudent.values())];
+          const [sections, grades] = await Promise.all([
+            Promise.all(sectionIds.map((id) => ctx.db.get(id))),
+            ctx.db.query("gradeLevels").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).collect(),
+          ]);
+          const gradeById = new Map(grades.map((g) => [g._id, g.name]));
+          for (const sec of sections) {
+            if (!sec) continue;
+            const gradeName = gradeById.get(sec.gradeLevelId);
+            classLabels.set(sec._id, gradeName ? `${gradeName} ${sec.streamName}`.trim() : sec.streamName);
+          }
+          for (const [sid, secId] of activeByStudent) {
+            const label = classLabels.get(secId);
+            if (label) classLabels.set(sid, label); // studentId -> class label
+          }
         }
+      }
+      for (const s of matched) {
+        const classLabel = classLabels.get(s._id);
+        hits.push({
+          type: "student",
+          id: s._id,
+          title: `${s.firstName} ${s.lastName}`,
+          subtitle: classLabel ? `${classLabel} · Adm ${s.admissionNumber}` : `Student · Adm ${s.admissionNumber}`,
+          href: `/students/${s._id}`,
+        });
       }
     }
     if (canGuardians && hits.length < max) {
