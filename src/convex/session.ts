@@ -254,7 +254,22 @@ type SchoolScopedTable =
   | "schoolSubscriptions"
   | "subscriptionInvoices"
   | "featureFlags"
-  | "importJobs";
+  | "importJobs"
+  // Phase 7 — onboarding, admissions, billing depth, meals, access
+  | "applications"
+  | "applicationDocuments"
+  | "promotionRuns"
+  | "promotionLines"
+  | "feeVoteheads"
+  | "feeItemVoteheads"
+  | "paymentAllocations"
+  | "allocationSettings"
+  | "bankImportBatches"
+  | "bankImportRows"
+  | "mealPlans"
+  | "mealEnrollments"
+  | "mealConsumption"
+  | "onboardingRecords";
 
 /** Fetch a school-scoped record by ID and verify it belongs to the caller's school. */
 export async function getSchoolRecord<T extends SchoolScopedTable>(

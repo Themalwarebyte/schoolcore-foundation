@@ -1,13 +1,168 @@
+import { useState } from "react";
 import { Link } from "react-router";
 import { motion } from "framer-motion";
 import { useConvexAuth } from "convex/react";
+import { useMutation } from "convex/react";
+import { api } from "@/convex/_generated/api";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   GraduationCap, School, Users, CalendarRange, BookOpen, ShieldCheck,
   ArrowRight, Layers, UserCog, ScrollText, Globe, Search, Grid3X3, Check,
-  Megaphone, Bell,
+  Megaphone, Bell, Building2, Send,
 } from "lucide-react";
+
+/** Public school registration form — posts to phase7.registration.submitRequest. */
+function RegisterSchoolCard() {
+  const submit = useMutation(api.phase7.registration.submitRequest);
+  const [done, setDone] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState({
+    schoolName: "", registrationNumber: "", country: "Kenya", county: "",
+    schoolType: "", curriculum: "", expectedStudents: "", expectedTeachers: "",
+    website: "", email: "", phone: "", contactName: "", contactPosition: "",
+    contactEmail: "", contactPhone: "",
+  });
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await submit({
+        schoolName: form.schoolName,
+        registrationNumber: form.registrationNumber || undefined,
+        country: form.country || undefined,
+        county: form.county || undefined,
+        schoolType: form.schoolType || undefined,
+        curriculum: form.curriculum || undefined,
+        expectedStudents: form.expectedStudents ? Number(form.expectedStudents) : undefined,
+        expectedTeachers: form.expectedTeachers ? Number(form.expectedTeachers) : undefined,
+        website: form.website || undefined,
+        email: form.email,
+        phone: form.phone || undefined,
+        contactName: form.contactName,
+        contactPosition: form.contactPosition || undefined,
+        contactEmail: form.contactEmail,
+        contactPhone: form.contactPhone || undefined,
+      });
+      setDone(true);
+      toast.success("Registration request submitted — our team will be in touch.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not submit the request.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (done) {
+    return (
+      <div className="card-soft p-8 text-center">
+        <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600">
+          <Check className="size-6" />
+        </div>
+        <h3 className="mt-4 text-lg font-semibold">Request received</h3>
+        <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
+          Thank you — our team will review your school's details and reach out to
+          <span className="font-medium text-foreground"> {form.contactEmail}</span> with the next steps.
+        </p>
+        <Button asChild variant="outline" className="mt-6">
+          <Link to="/auth">Sign in to an existing school</Link>
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="card-soft space-y-5 p-6 sm:p-8">
+      <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+        <Building2 className="size-4" /> School information
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-1.5 sm:col-span-2">
+          <Label htmlFor="rs-name">School name *</Label>
+          <Input id="rs-name" required value={form.schoolName} onChange={set("schoolName")} placeholder="Greenfield Academy" />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="rs-reg">Registration number</Label>
+          <Input id="rs-reg" value={form.registrationNumber} onChange={set("registrationNumber")} placeholder="MOE/2018/001" />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="rs-type">School type</Label>
+          <Input id="rs-type" value={form.schoolType} onChange={set("schoolType")} placeholder="Primary, Secondary, Mixed…" />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="rs-county">County / state</Label>
+          <Input id="rs-county" value={form.county} onChange={set("county")} placeholder="Nairobi" />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="rs-country">Country</Label>
+          <Input id="rs-country" value={form.country} onChange={set("country")} />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="rs-cur">Curriculum</Label>
+          <Input id="rs-cur" value={form.curriculum} onChange={set("curriculum")} placeholder="CBC, 8-4-4, IGCSE…" />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="rs-students">Students</Label>
+            <Input id="rs-students" type="number" min="0" value={form.expectedStudents} onChange={set("expectedStudents")} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="rs-teachers">Teachers</Label>
+            <Input id="rs-teachers" type="number" min="0" value={form.expectedTeachers} onChange={set("expectedTeachers")} />
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="rs-web">Website</Label>
+          <Input id="rs-web" value={form.website} onChange={set("website")} placeholder="https://…" />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="rs-email">School email *</Label>
+          <Input id="rs-email" required type="email" value={form.email} onChange={set("email")} placeholder="info@school.ac.ke" />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="rs-phone">School phone</Label>
+          <Input id="rs-phone" value={form.phone} onChange={set("phone")} placeholder="+254 …" />
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 border-t pt-5 text-sm font-medium text-muted-foreground">
+        <Users className="size-4" /> Contact person
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="rs-cname">Full name *</Label>
+          <Input id="rs-cname" required value={form.contactName} onChange={set("contactName")} />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="rs-cpos">Position</Label>
+          <Input id="rs-cpos" value={form.contactPosition} onChange={set("contactPosition")} placeholder="Head teacher, Director…" />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="rs-cemail">Email *</Label>
+          <Input id="rs-cemail" required type="email" value={form.contactEmail} onChange={set("contactEmail")} />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="rs-cphone">Phone</Label>
+          <Input id="rs-cphone" value={form.contactPhone} onChange={set("contactPhone")} />
+        </div>
+      </div>
+
+      <Button type="submit" size="lg" disabled={busy} className="w-full sm:w-auto">
+        <Send className="size-4" /> {busy ? "Submitting…" : "Submit registration request"}
+      </Button>
+      <p className="text-xs text-muted-foreground">
+        By submitting you agree to be contacted about SchoolCore onboarding. Uploads such as
+        the registration certificate can be added when our team contacts you.
+      </p>
+    </form>
+  );
+}
 
 const FEATURES = [
   {
@@ -78,6 +233,7 @@ export default function Landing() {
             <a href="#platform" className="transition-colors hover:text-foreground">Platform</a>
             <a href="#portals" className="transition-colors hover:text-foreground">Portals</a>
             <a href="#roles" className="transition-colors hover:text-foreground">Roles</a>
+            <a href="#register" className="font-medium text-primary transition-colors hover:text-primary/80">Register your school</a>
           </nav>
           <div className="flex items-center gap-2">
             {!isLoading && isAuthenticated ? (
@@ -370,6 +526,25 @@ export default function Landing() {
             <p className="mt-4 text-center text-xs text-muted-foreground">
               Parent and Student portal accounts are provisioned by the school — no public signup, ever.
             </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Register your school (Phase 7) */}
+      <section id="register" className="border-t bg-muted/30 py-20">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6">
+          <div className="mx-auto max-w-2xl text-center">
+            <Badge variant="outline" className="mb-4 gap-1.5 border-primary/30 bg-primary/5 text-primary">
+              <School className="size-3.5" /> For new schools
+            </Badge>
+            <h2 className="text-balance text-3xl font-semibold tracking-tight">Register Your School</h2>
+            <p className="mt-3 text-muted-foreground">
+              Tell us about your school and our team will review your request, set up your
+              workspace and walk you through a guided onboarding — usually within two working days.
+            </p>
+          </div>
+          <div className="mx-auto mt-10 max-w-3xl">
+            <RegisterSchoolCard />
           </div>
         </div>
       </section>
