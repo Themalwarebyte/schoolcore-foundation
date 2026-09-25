@@ -161,6 +161,21 @@ export const PERMISSIONS = [
   "ai.view",
   "data.import",
   "data.export",
+  // phase 7 — onboarding, admissions, billing depth, meals, access
+  "onboarding.view",
+  "onboarding.manage",
+  "admissions.view",
+  "admissions.manage",
+  "admissions.decide",
+  "promotions.manage",
+  "billing.voteheads.manage",
+  "payments.allocate",
+  "payments.reconcile",
+  "bank_imports.view",
+  "bank_imports.manage",
+  "meals.view",
+  "meals.manage",
+  "meals.consume",
   "platform.subscriptions.view",
   "platform.subscriptions.manage",
   "platform.health.view",
@@ -247,6 +262,14 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "gps.view", "gps.manage",
     "ai.view",
     "data.import", "data.export",
+    // Phase 7: school admin runs onboarding, admissions, billing depth
+    "onboarding.view", "onboarding.manage",
+    "admissions.view", "admissions.manage", "admissions.decide",
+    "promotions.manage",
+    "billing.voteheads.manage",
+    "payments.allocate", "payments.reconcile",
+    "bank_imports.view", "bank_imports.manage",
+    "meals.view", "meals.manage",
   ],
   principal: [
     "dashboard.view",
@@ -291,6 +314,10 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "library.view", "transport.view", "boarding.view", "inventory.view", "procurement.view",
     // Phase 6: principal oversight
     "integrations.view", "communications.view", "automations.view", "ai.view", "payments_external.view",
+    // Phase 7: principal reviews admissions (recommends), views onboarding/meals
+    "admissions.view", "admissions.decide",
+    "onboarding.view",
+    "meals.view", "meals.manage",
   ],
   teacher: [
     "dashboard.view",
@@ -344,6 +371,11 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     // Phase 6: bursar runs external payments reconciliation
     "payments_external.view", "payments_external.manage", "payments_external.reconcile",
     "communications.view",
+    // Phase 7: bursar owns votehead billing, allocation & reconciliation
+    "billing.voteheads.manage",
+    "payments.allocate", "payments.reconcile",
+    "bank_imports.view", "bank_imports.manage",
+    "data.export",
   ],
   parent: [
     "dashboard.view", "school.view",
@@ -356,6 +388,8 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     // Phase 6: GPS transport view — the query itself resolves ONLY the
     // vehicles serving the caller's own children (identity.parentTransportView).
     "gps.view",
+    // Phase 7: parents see their own children's meal plan eligibility only.
+    "meals.view",
   ],
   student: [
     "dashboard.view", "school.view",
@@ -489,6 +523,34 @@ export const PURCHASE_ORDER_STATUSES = ["draft", "submitted", "approved", "recei
 /* Phase 5 enums — medical */
 export const VISIT_DISPOSITIONS = ["sent_home", "sent_to_hospital", "returned_to_class", "referred", "other"] as const;
 export const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "unknown"] as const;
+
+/* Phase 7 enums — onboarding, admissions, billing depth, meals */
+export const SCHOOL_REQUEST_STATUSES = [
+  "submitted", "under_review", "approved", "rejected", "onboarding", "active",
+] as const;
+export const SCHOOL_REQUEST_DECISIONS = [
+  "approve", "reject", "more_info",
+] as const;
+export const ONBOARDING_STEPS = [
+  "profile", "academics", "users", "import", "activate",
+] as const;
+export const APPLICATION_STATUSES = [
+  "submitted", "under_review", "assessment", "accepted", "rejected", "waitlisted", "enrolled", "withdrawn",
+] as const;
+export const PROMOTION_OUTCOMES = [
+  "promoted", "repeated", "transferred", "graduated",
+] as const;
+export const ALLOCATION_STRATEGIES = [
+  "votehead_priority", "oldest_first", "manual",
+] as const;
+export const ALLOCATION_STATUSES = ["allocated", "partially_allocated", "unallocated"] as const;
+export const BANK_IMPORT_STATUSES = ["draft", "matched", "posted", "discarded"] as const;
+export const MEAL_PLAN_TYPES = ["lunch", "milk", "snack", "full_board"] as const;
+export const MEAL_CONSUMPTION_TYPES = ["lunch", "milk", "snack"] as const;
+export const MEAL_ELIGIBILITY_STATUSES = ["active", "suspended", "ended"] as const;
+export const INVITATION_STATUSES = ["pending", "accepted", "expired", "revoked"] as const;
+export const ACTIVATION_TOKEN_KINDS = ["invitation", "activation", "password_reset"] as const;
+export const ACTIVATION_TOKEN_STATUSES = ["pending", "used", "expired", "revoked"] as const;
 
 /* ------------------------------------------------------------------ */
 /* Schema                                                              */
