@@ -3,6 +3,7 @@ import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Link, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
 import { StatusBadge, formatDate } from "@/lib/status";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -192,7 +193,7 @@ function GuardiansTab({ studentId }: { studentId: string }) {
                   await unlink({ linkId: confirmId as never });
                   toast.success("Guardian unlinked");
                 } catch (err) {
-                  toast.error("Unable to unlink.", { description: err instanceof Error ? err.message : undefined });
+                  toast.error("Unable to unlink.", { description: friendlyError(err) });
                 }
               }}
             >
@@ -249,7 +250,7 @@ function LinkGuardianDialog({ studentId }: { studentId: string }) {
                   toast.success("Guardian linked", { description: `${g.name} is now linked.` });
                   setOpen(false);
                 } catch (err) {
-                  toast.error("Unable to link guardian.", { description: err instanceof Error ? err.message : undefined });
+                  toast.error("Unable to link guardian.", { description: friendlyError(err) });
                 }
               }}
             >
@@ -349,7 +350,7 @@ function EnrollmentTab({
                           await remove({ enrollmentId: e._id as never });
                           toast.success("Enrollment record removed");
                         } catch (err) {
-                          toast.error("Unable to remove.", { description: err instanceof Error ? err.message : undefined });
+                          toast.error("Unable to remove.", { description: friendlyError(err) });
                         }
                       }}
                     >
@@ -419,7 +420,7 @@ function EnrollmentTab({
                   toast.success("Student enrolled");
                   setOpen(false);
                 } catch (err) {
-                  toast.error("Unable to enroll.", { description: err instanceof Error ? err.message : undefined });
+                  toast.error("Unable to enroll.", { description: friendlyError(err) });
                 }
               }}
             >

@@ -2,8 +2,10 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { Link } from "react-router";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
+import { HelpHint } from "@/components/shared/help-hint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -79,7 +81,7 @@ export default function Invoices() {
       setStudentId("");
       setItems([{ description: "", category: "Tuition", quantity: "1", amount: "" }]);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to create invoice");
+      toast.error(friendlyError(err));
     } finally {
       setSaving(false);
     }
@@ -153,7 +155,7 @@ export default function Invoices() {
                           try {
                             await issueInvoice({ invoiceId: inv._id as never });
                             toast.success("Invoice issued");
-                          } catch (err) { toast.error(err instanceof Error ? err.message : "Failed"); }
+                          } catch (err) { toast.error(friendlyError(err)); }
                         }}>
                           <Send className="size-3.5" /> Issue
                         </Button>
@@ -167,7 +169,7 @@ export default function Invoices() {
                           try {
                             await cancelInvoice({ invoiceId: inv._id as never, reason });
                             toast.success("Invoice cancelled with audit trail");
-                          } catch (err) { toast.error(err instanceof Error ? err.message : "Failed"); }
+                          } catch (err) { toast.error(friendlyError(err)); }
                         }}>
                           <Ban className="size-3.5" />
                         </Button>
@@ -194,7 +196,9 @@ export default function Invoices() {
       {/* Create invoice dialog */}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>New invoice</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-1.5">New invoice <HelpHint text="Choose the student and term, then add line items. Each item's category maps to a fee votehead used for payment allocation and reports." /></DialogTitle>
+          </DialogHeader>
           <div className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
@@ -219,7 +223,7 @@ export default function Invoices() {
                 </select>
               </div>
               <div>
-                <Label>Term</Label>
+                <Label className="flex items-center gap-1.5">Term <HelpHint text="Only terms in an academic year are listed. Set the current year on the Fees page if this is empty." /></Label>
                 <TermSelect yearId="" termId={termId} onChange={setTermId} className="mt-1" />
                 {terms === undefined && <p className="mt-1 text-xs text-muted-foreground">Pick a year first on the Fees page context if empty.</p>}
               </div>

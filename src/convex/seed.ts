@@ -88,6 +88,9 @@ export const seedAll = action({
       }
       // Fill any Phase 2 academic-operations gaps (idempotent).
       await ctx.runMutation(internal.seedHelpers.seedAcademicOps, {});
+      // Complete demo results workflow (approve → publish → report cards).
+      await ctx.runMutation(internal.seedHelpers.completeDemoResultsWorkflow, {});
+      await ctx.runMutation(internal.reportCards.generateInternalSeedForSeed, {});
       // Fill any Phase 3 finance gaps (idempotent).
       await ctx.runMutation(internal.seedHelpers.seedFinance, {});
       // Phase 4 portal demo data (announcements; links are ensured below).
@@ -443,6 +446,12 @@ export const seedAll = action({
 
     // Phase 2 academic operations config + demo data (idempotent).
     await ctx.runMutation(internal.seedHelpers.seedAcademicOps, {});
+    // Complete the demo results workflow through the real engines:
+    // approve + publish seeded subject results, then generate and publish
+    // report cards for the demo class so portals show a fully populated
+    // academic picture (idempotent — skips already-published rows).
+    await ctx.runMutation(internal.seedHelpers.completeDemoResultsWorkflow, {});
+    await ctx.runMutation(internal.reportCards.generateInternalSeedForSeed, {});
     // Phase 3 finance config + demo data (idempotent).
     await ctx.runMutation(internal.seedHelpers.seedFinance, {});
 

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { Link } from "react-router";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
 import { downloadReportCardPdf, downloadClassReportCardsPdf, type ReportCardPdfData } from "@/lib/reportCardPdf";
@@ -61,7 +62,7 @@ export default function ReportCards() {
       downloadClassReportCardsPdf(docs);
       toast.success(`Downloaded ${docs.length} report card page(s) as one PDF`);
     } catch (err) {
-      toast.error("Bulk download failed.", { description: err instanceof Error ? err.message : undefined });
+      toast.error("Bulk download failed.", { description: friendlyError(err) });
     } finally {
       setBulkLoading(false);
     }
@@ -119,7 +120,7 @@ export default function ReportCards() {
                     });
                     toast.success(`Generated ${r.generated}, skipped ${r.skipped} (no approved results yet)`);
                   } catch (err) {
-                    toast.error("Unable to generate.", { description: err instanceof Error ? err.message : undefined });
+                    toast.error("Unable to generate.", { description: friendlyError(err) });
                   }
                 }}
               >
@@ -135,7 +136,7 @@ export default function ReportCards() {
                     const r = await publish({ termId: effectiveTermId as never, classSectionId: classSectionId as never });
                     toast.success(`Published ${r.count} report card(s)`);
                   } catch (err) {
-                    toast.error("Unable to publish.", { description: err instanceof Error ? err.message : undefined });
+                    toast.error("Unable to publish.", { description: friendlyError(err) });
                   }
                 }}
               >

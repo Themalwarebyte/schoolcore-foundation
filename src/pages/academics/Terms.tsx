@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -55,7 +56,7 @@ export default function Terms() {
       setOpen(false);
       setForm({ name: "", startDate: "", endDate: "", displayOrder: 1 });
     } catch (err) {
-      toast.error("Unable to create the term.", { description: err instanceof Error ? err.message : undefined });
+      toast.error("Unable to create the term.", { description: friendlyError(err) });
     } finally {
       setSaving(false);
     }
@@ -196,7 +197,7 @@ export default function Terms() {
                   await archive({ termId: archiveId as never });
                   toast.success("Term archived");
                 } catch (err) {
-                  toast.error("Unable to archive.", { description: err instanceof Error ? err.message : undefined });
+                  toast.error("Unable to archive.", { description: friendlyError(err) });
                 }
               }}
             >

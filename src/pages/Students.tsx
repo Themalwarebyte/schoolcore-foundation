@@ -3,6 +3,7 @@ import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Link } from "react-router";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
 import { DataTable } from "@/components/shared/data-table";
 import { StatusBadge, formatDate } from "@/lib/status";
@@ -89,7 +90,7 @@ export default function Students() {
       setAddOpen(false);
       setForm({ firstName: "", middleName: "", lastName: "", preferredName: "", gender: "female", dateOfBirth: "", nationality: "", admissionDate: "", admissionNumber: "", studentStatus: "active", boardingStatus: "day", previousSchool: "", notes: "" });
     } catch (err) {
-      toast.error("Unable to save the student.", { description: err instanceof Error ? err.message : "Please review the highlighted fields." });
+      toast.error("Unable to save the student.", { description: friendlyError(err) });
     } finally {
       setSaving(false);
     }
@@ -258,7 +259,7 @@ function ArchiveMenuItem({ studentId, name }: { studentId: string; name: string 
                   await archive({ studentId: studentId as never, status: "archived" });
                   toast.success("Student archived");
                 } catch (err) {
-                  toast.error("Unable to archive.", { description: err instanceof Error ? err.message : undefined });
+                  toast.error("Unable to archive.", { description: friendlyError(err) });
                 }
               }}
             >

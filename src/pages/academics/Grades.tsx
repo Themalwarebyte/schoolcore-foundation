@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -71,7 +72,7 @@ export default function Grades() {
       }
       setOpen(false);
     } catch (err) {
-      toast.error("Unable to save the grade level.", { description: err instanceof Error ? err.message : undefined });
+      toast.error("Unable to save the grade level.", { description: friendlyError(err) });
     } finally {
       setSaving(false);
     }
@@ -140,7 +141,7 @@ export default function Grades() {
                                   });
                                   toast.success("Grade level restored");
                                 } catch (err) {
-                                  toast.error("Unable to restore.", { description: err instanceof Error ? err.message : undefined });
+                                  toast.error("Unable to restore.", { description: friendlyError(err) });
                                 }
                               }}
                             >
@@ -212,7 +213,7 @@ export default function Grades() {
                   });
                   toast.success("Grade level archived");
                 } catch (err) {
-                  toast.error("Unable to archive.", { description: err instanceof Error ? err.message : undefined });
+                  toast.error("Unable to archive.", { description: friendlyError(err) });
                 }
               }}
             >

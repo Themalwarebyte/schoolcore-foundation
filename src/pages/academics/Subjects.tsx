@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -74,7 +75,7 @@ export default function Subjects() {
       }
       setOpen(false);
     } catch (err) {
-      toast.error("Unable to save the subject.", { description: err instanceof Error ? err.message : undefined });
+      toast.error("Unable to save the subject.", { description: friendlyError(err) });
     } finally {
       setSaving(false);
     }
@@ -144,7 +145,7 @@ export default function Subjects() {
                                   });
                                   toast.success("Subject restored");
                                 } catch (err) {
-                                  toast.error("Unable to restore.", { description: err instanceof Error ? err.message : undefined });
+                                  toast.error("Unable to restore.", { description: friendlyError(err) });
                                 }
                               }}
                             >
@@ -228,7 +229,7 @@ export default function Subjects() {
                   });
                   toast.success("Subject archived");
                 } catch (err) {
-                  toast.error("Unable to archive.", { description: err instanceof Error ? err.message : undefined });
+                  toast.error("Unable to archive.", { description: friendlyError(err) });
                 }
               }}
             >

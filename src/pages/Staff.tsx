@@ -3,6 +3,7 @@ import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Link } from "react-router";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
 import { DataTable } from "@/components/shared/data-table";
 import { StatusBadge } from "@/lib/status";
@@ -167,7 +168,7 @@ function AddStaffDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
       onOpenChange(false);
       void staffId;
     } catch (err) {
-      toast.error("Unable to save the staff member.", { description: err instanceof Error ? err.message : undefined });
+      toast.error("Unable to save the staff member.", { description: friendlyError(err) });
     } finally {
       setSaving(false);
     }

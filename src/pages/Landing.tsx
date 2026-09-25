@@ -5,6 +5,7 @@ import { useConvexAuth } from "convex/react";
 import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -53,7 +54,7 @@ function RegisterSchoolCard() {
       setDone(true);
       toast.success("Registration request submitted — our team will be in touch.");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not submit the request.");
+      toast.error(friendlyError(err));
     } finally {
       setBusy(false);
     }

@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { HelpHint } from "@/components/shared/help-hint";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
 import { DataTable } from "@/components/shared/data-table";
 import { Badge } from "@/components/ui/badge";
@@ -237,7 +239,7 @@ function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
       setCode(res.token);
       toast.success("Invitation sent", { description: `${form.email} will set their own password.` });
     } catch (err) {
-      toast.error("Unable to send the invitation.", { description: err instanceof Error ? err.message : undefined });
+      toast.error("Unable to send the invitation.", { description: friendlyError(err) });
     } finally {
       setSaving(false);
     }
@@ -247,7 +249,7 @@ function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Invite user</DialogTitle>
+          <DialogTitle className="flex items-center gap-1.5">Invite user <HelpHint text="Invitations allow users to securely create their own passwords. The one-time link expires after 7 days and can only be used once." /></DialogTitle>
           <DialogDescription>
             Generates a one-time activation link. The user sets their own password — no temporary passwords.
           </DialogDescription>

@@ -2,7 +2,9 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
+import { HelpHint } from "@/components/shared/help-hint";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -76,7 +78,7 @@ export default function Fees() {
         setBillingFor(null);
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Billing failed");
+      toast.error(friendlyError(err));
     } finally {
       setSaving(false);
     }
@@ -96,7 +98,7 @@ export default function Fees() {
       setName("");
       setItems([{ ...emptyItem }]);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Save failed");
+      toast.error(friendlyError(err));
     } finally {
       setSaving(false);
     }
@@ -115,7 +117,7 @@ export default function Fees() {
               </DialogTrigger>
               <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
                 <DialogHeader>
-                  <DialogTitle>New fee structure</DialogTitle>
+                  <DialogTitle className="flex items-center gap-1.5">New fee structure <HelpHint text="Fee items are charges such as tuition, transport, meals and activities. The billing run creates one invoice per student from this structure." /></DialogTitle>
                 </DialogHeader>
                 <div className="space-y-4">
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -213,7 +215,7 @@ export default function Fees() {
                                 await archiveStructure({ feeStructureId: s._id as never });
                                 toast.success("Structure archived");
                               } catch (err) {
-                                toast.error(err instanceof Error ? err.message : "Failed");
+                                toast.error(friendlyError(err));
                               }
                             }}
                           >

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader } from "@/components/layouts/school-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -121,7 +122,7 @@ function RowActions({ id, status, title }: { id: string; status: string; title: 
               toast.success(`"${title}" published`);
             } catch (err) {
               toast.error("Could not publish.", {
-                description: err instanceof Error ? err.message : undefined,
+                description: undefined,
               });
             }
           }}
@@ -139,7 +140,7 @@ function RowActions({ id, status, title }: { id: string; status: string; title: 
               toast.success(`"${title}" archived`);
             } catch (err) {
               toast.error("Could not archive.", {
-                description: err instanceof Error ? err.message : undefined,
+                description: undefined,
               });
             }
           }}
@@ -185,7 +186,7 @@ function CreateDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v:
       onOpenChange(false);
     } catch (err) {
       toast.error("Could not save the announcement.", {
-        description: err instanceof Error ? err.message : undefined,
+        description: undefined,
       });
     } finally {
       setBusy(false);

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader } from "@/components/layouts/platform-layout";
 import { DataTable } from "@/components/shared/data-table";
 import { Badge } from "@/components/ui/badge";
@@ -66,7 +67,7 @@ export default function SchoolRequests() {
       setNotes("");
       setDetailId(null);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Action failed.");
+      toast.error(friendlyError(err));
     }
   }
 

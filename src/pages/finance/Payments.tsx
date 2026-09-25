@@ -2,7 +2,9 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
+import { HelpHint } from "@/components/shared/help-hint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -63,7 +65,7 @@ export default function Payments() {
       setReferenceNumber("");
       setNotes("");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to record payment");
+      toast.error(friendlyError(err));
     } finally {
       setSaving(false);
     }
@@ -99,7 +101,7 @@ export default function Payments() {
       downloadPdf(doc, `${detail.receipt?.receiptNumber ?? detail.payment.paymentNumber}.pdf`);
       toast.success("Receipt PDF downloaded");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to build receipt");
+      toast.error(friendlyError(err));
     }
   };
 
@@ -179,7 +181,7 @@ export default function Payments() {
                           try {
                             await reversePayment({ paymentId: p._id as never, reason });
                             toast.success("Payment reversed and receipt voided");
-                          } catch (err) { toast.error(err instanceof Error ? err.message : "Failed"); }
+                          } catch (err) { toast.error(friendlyError(err)); }
                         }}>
                           <Undo2 className="size-3.5" />
                         </Button>
@@ -206,12 +208,14 @@ export default function Payments() {
       {/* Record payment dialog */}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Record payment</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-1.5">Record payment <HelpHint text="Choose how received payments should be applied against outstanding charges. The oldest balance is settled first unless you allocate manually in the Reconciliation centre." /></DialogTitle>
+          </DialogHeader>
           <div className="space-y-4">
             <div>
               <Label>Student</Label>
-              <Input placeholder="Search name or admission no…" value={studentSearch} onChange={(e) => setStudentSearch(e.target.value)} className="mt-1" />
-              <select className="mt-2 h-9 w-full rounded-md border bg-background px-2 text-sm" value={studentId} onChange={(e) => setStudentId(e.target.value)}>
+              <Input aria-label="Search students by name or admission number" placeholder="Search name or admission no…" value={studentSearch} onChange={(e) => setStudentSearch(e.target.value)} className="mt-1" />
+              <select aria-label="Select student" className="mt-2 h-9 w-full rounded-md border bg-background px-2 text-sm" value={studentId} onChange={(e) => setStudentId(e.target.value)}>
                 <option value="">Select student…</option>
                 {filteredStudents.map((s) => (
                   <option key={s._id} value={s._id}>{s.firstName} {s.lastName} — {s.admissionNumber}</option>
@@ -219,14 +223,14 @@ export default function Payments() {
               </select>
             </div>
             <ScopeBar>
-              <div>
-                <Label className="text-xs text-muted-foreground">Amount</Label>
-                <Input type="number" min="1" value={amount} onChange={(e) => setAmount(e.target.value)} className="mt-1" />
-              </div>
-              <div>
-                <Label className="text-xs text-muted-foreground">Payment date</Label>
-                <Input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} className="mt-1" />
-              </div>
+            <div>
+              <Label htmlFor="pay-amount" className="text-xs text-muted-foreground">Amount</Label>
+              <Input id="pay-amount" type="number" min="1" value={amount} onChange={(e) => setAmount(e.target.value)} className="mt-1" />
+            </div>
+            <div>
+              <Label htmlFor="pay-date" className="text-xs text-muted-foreground">Payment date</Label>
+              <Input id="pay-date" type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} className="mt-1" />
+            </div>
             </ScopeBar>
             <div className="grid gap-3 sm:grid-cols-2">
               <div>

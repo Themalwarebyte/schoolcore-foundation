@@ -3,6 +3,7 @@ import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Link } from "react-router";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
 import { DataTable } from "@/components/shared/data-table";
 import { usePermissions } from "@/hooks/use-session";
@@ -67,7 +68,7 @@ export default function Guardians() {
       setAddOpen(false);
       setForm({ firstName: "", middleName: "", lastName: "", relationship: "guardian", phone: "", altPhone: "", email: "", occupation: "", address: "", nationalId: "" });
     } catch (err) {
-      toast.error("Unable to save the guardian.", { description: err instanceof Error ? err.message : undefined });
+      toast.error("Unable to save the guardian.", { description: friendlyError(err) });
     } finally {
       setSaving(false);
     }

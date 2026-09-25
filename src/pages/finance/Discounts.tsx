@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -61,7 +62,7 @@ export default function Discounts() {
       setOpen(false);
       setStudentId(""); setName(""); setValue(""); setReason("");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed");
+      toast.error(friendlyError(err));
     } finally {
       setSaving(false);
     }
@@ -95,7 +96,7 @@ export default function Discounts() {
       setSchOpen(false);
       setSchStudentId(""); setSchName(""); setSchValue(""); setSchReason("");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed");
+      toast.error(friendlyError(err));
     } finally {
       setSchSaving(false);
     }
@@ -164,7 +165,7 @@ export default function Discounts() {
                                 try {
                                   const res = await approveDiscount({ discountId: d._id as never });
                                   toast.success(`Discount applied: ${res.computedAmount.toLocaleString()} credited`);
-                                } catch (err) { toast.error(err instanceof Error ? err.message : "Failed"); }
+                                } catch (err) { toast.error(friendlyError(err)); }
                               }}>
                                 <Check className="size-3.5" /> Approve
                               </Button>
@@ -174,7 +175,7 @@ export default function Discounts() {
                                 try {
                                   await rejectDiscount({ discountId: d._id as never, reason: r });
                                   toast.success("Discount rejected");
-                                } catch (err) { toast.error(err instanceof Error ? err.message : "Failed"); }
+                                } catch (err) { toast.error(friendlyError(err)); }
                               }}>
                                 <X className="size-3.5" />
                               </Button>
