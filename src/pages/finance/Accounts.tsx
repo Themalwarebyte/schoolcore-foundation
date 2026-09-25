@@ -57,7 +57,7 @@ export default function Accounts() {
     <div className="page-shell">
       <PageHeader
         title="Student Accounts"
-        description="Ledger-derived balances, class summaries and auditable account statements."
+        description="Balances, class summaries and full transaction history for every student."
       />
 
       <Tabs value={tab} onValueChange={setTab}>

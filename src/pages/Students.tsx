@@ -24,7 +24,8 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Plus, Search, MoreHorizontal, Eye, Archive } from "lucide-react";
+import { Plus, Search, MoreHorizontal, Eye, Archive, Upload, Download, FileWarning } from "lucide-react";
+import { ImportStudentsDialog } from "@/components/shared/import-dialog";
 
 const PAGE_SIZE = 15;
 
@@ -36,6 +37,7 @@ export default function Students() {
   const [status, setStatus] = useState("all");
   const [classSectionId, setClassSectionId] = useState("all");
   const [addOpen, setAddOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   const years = useQuery(api.academics.listYears);
   const currentYear = years?.find((y) => y.isCurrent);
@@ -141,6 +143,9 @@ export default function Students() {
         description="Central records for every learner at your school."
         actions={
           <Can permission="students.create">
+            <Button variant="outline" onClick={() => setImportOpen(true)}>
+              <Upload className="size-4" /> Import
+            </Button>
             <Button onClick={() => setAddOpen(true)}>
               <Plus className="size-4" /> Add student
             </Button>
@@ -213,6 +218,13 @@ export default function Students() {
         setForm={setForm as React.Dispatch<React.SetStateAction<Record<string, string>>>}
         saving={saving}
         onSubmit={handleCreate}
+      />
+
+      <ImportStudentsDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        hasCurrentYear={!!currentYear}
+        onImported={() => setPage(0)}
       />
     </div>
   );

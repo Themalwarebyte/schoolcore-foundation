@@ -134,7 +134,7 @@ export default function BankImports() {
                           try {
                             await setRowMatch({ rowId: r._id as never, studentId: (e.target.value || undefined) as never });
                             toast.success("Match updated");
-                          } catch (err) { toast.error(String(err)); }
+                          } catch (err) { toast.error(friendlyError(err)); }
                         }}
                       >
                         <option value="">— unmatched —</option>
@@ -151,7 +151,7 @@ export default function BankImports() {
                           try {
                             await setRowMatch({ rowId: r._id as never, studentId: (e.target.value || undefined) as never });
                             toast.success("Match set");
-                          } catch (err) { toast.error(String(err)); }
+                          } catch (err) { toast.error(friendlyError(err)); }
                         }}
                       >
                         <option value="">— pick student —</option>
@@ -166,7 +166,7 @@ export default function BankImports() {
                         const reason = window.prompt("Discard reason (required):");
                         if (!reason) return;
                         try { await discardRow({ rowId: r._id as never, reason }); toast.success("Row discarded"); }
-                        catch (err) { toast.error(String(err)); }
+                        catch (err) { toast.error(friendlyError(err)); }
                       }}>
                         <XCircle className="size-3.5" />
                       </Button>
@@ -186,7 +186,7 @@ export default function BankImports() {
                       try {
                         const res = await postRows({ rowIds: draftRows.map((r) => r._id as never) });
                         toast.success(`${res.posted} posted, ${res.skipped} skipped${res.errors.length ? `, ${res.errors.length} error(s)` : ""}`);
-                      } catch (e) { toast.error(String(e)); }
+                      } catch (e) { toast.error(friendlyError(e)); }
                     }}
                   >
                     <Send className="size-4" /> Post {draftRows.length} matched row(s)
@@ -195,7 +195,7 @@ export default function BankImports() {
                     try {
                       await finalizeBatch({ batchId: activeBatch as never });
                       toast.success("Batch finalized"); setActiveBatch(null);
-                    } catch (e) { toast.error(String(e)); }
+                    } catch (e) { toast.error(friendlyError(e)); }
                   }}>Finalize batch</Button>
                 </div>
               </CardContent>
@@ -272,7 +272,7 @@ export default function BankImports() {
                   toast.success(`Staged ${res.rowCount} row(s)`);
                   setUploadOpen(false);
                   setActiveBatch(res.batchId);
-                } catch (e) { toast.error(String(e)); }
+                } catch (e) { toast.error(friendlyError(e)); }
               }}
             >Stage import</Button>
           </DialogFooter>
@@ -280,4 +280,15 @@ export default function BankImports() {
       </Dialog>
     </>
   );
+}
+
+/** Convert backend failures into user-friendly toast text. */
+function friendlyError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err ?? "");
+  const m = raw.match(/Uncaught ConvexError: (.+?)(?:\n|$)/);
+  const core = (m ? m[1] : raw)
+    .replace(/^\[Request ID: [^\]]+\]\s*/, "")
+    .replace(/\s+at .*/g, "")
+    .trim();
+  return core.length > 0 ? core.slice(0, 180) : "Something went wrong. Please try again.";
 }

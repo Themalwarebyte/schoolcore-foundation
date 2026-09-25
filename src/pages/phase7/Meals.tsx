@@ -137,7 +137,7 @@ export default function Meals() {
                 actions: e.status === "active" ? (
                   <Button size="sm" variant="outline" onClick={async () => {
                     try { await endEnrollment({ mealEnrollmentId: e._id as never, status: "ended" }); toast.success("Eligibility ended"); }
-                    catch (err) { toast.error(String(err)); }
+                    catch (err) { toast.error(friendlyError(err)); }
                   }}>End</Button>
                 ) : null,
               }))}
@@ -211,7 +211,7 @@ export default function Meals() {
                 try {
                   await upsertPlan({ name: planName.trim(), planType, dailyCost: Number(planCost), description: planDesc || undefined });
                   toast.success("Meal plan created"); setPlanOpen(false);
-                } catch (e) { toast.error(String(e)); }
+                } catch (e) { toast.error(friendlyError(e)); }
               }}
             >Save</Button>
           </DialogFooter>
@@ -274,7 +274,7 @@ export default function Meals() {
                   });
                   toast.success("Student enrolled in meal plan");
                   setEnrollOpen(false);
-                } catch (e) { toast.error(String(e)); }
+                } catch (e) { toast.error(friendlyError(e)); }
               }}
             >Enroll</Button>
           </DialogFooter>
@@ -313,7 +313,7 @@ export default function Meals() {
                   await recordByQr({ token: qrToken.trim(), mealType: qrMealType });
                   toast.success(`${qrMealType} recorded`);
                   setQrToken("");
-                } catch (e) { toast.error(String(e)); }
+                } catch (e) { toast.error(friendlyError(e)); }
               }}
             >Record meal</Button>
           </DialogFooter>
@@ -321,4 +321,15 @@ export default function Meals() {
       </Dialog>
     </>
   );
+}
+
+/** Convert backend failures into user-friendly toast text. */
+function friendlyError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err ?? "");
+  const m = raw.match(/Uncaught ConvexError: (.+?)(?:\n|$)/);
+  const core = (m ? m[1] : raw)
+    .replace(/^\[Request ID: [^\]]+\]\s*/, "")
+    .replace(/\s+at .*/g, "")
+    .trim();
+  return core.length > 0 ? core.slice(0, 180) : "Something went wrong. Please try again.";
 }
