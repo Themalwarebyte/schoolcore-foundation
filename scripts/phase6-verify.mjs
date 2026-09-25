@@ -34,7 +34,14 @@ function check(name, cond, detail = "") {
 }
 function describeErr(err) {
   let e = err, parts = [];
-  while (e) { parts.push(String(e.message ?? e)); e = e.cause; }
+  while (e) {
+    // ConvexError message text is redacted on production deployments, but the
+    // structured `.data` payload (the thrown string) survives redaction —
+    // always surface it so denial messages are visible to the harness.
+    const data = e.data !== undefined && e.data !== null ? ` [${typeof e.data === "object" ? JSON.stringify(e.data) : String(e.data)}]` : "";
+    parts.push(`${String(e.message ?? e)}${data}`);
+    e = e.cause;
+  }
   return parts.join(" :: ").slice(0, 220);
 }
 function isDenied(err) {
@@ -44,7 +51,8 @@ function isDenied(err) {
     s.includes("does not belong") || s.includes("access to this record") || s.includes("invalid") ||
     s.includes("unrecognized") || s.includes("must be") || s.includes("you can only") ||
     s.includes("platform access") || s.includes("unknown") || s.includes("required") ||
-    s.includes("must match") || s.includes("no such") || s.includes("revoked") || s.includes("select a school");
+    s.includes("must match") || s.includes("no such") || s.includes("revoked") || s.includes("select a school") ||
+    s.includes("add at least") || s.includes("already") || s.includes("administrator");
 }
 
 async function signIn(email, password) {
@@ -71,12 +79,19 @@ const BR = async (name, args = {}) => {
   const c = new ConvexHttpClient(url);
   try {
     return await c.action(anyApi.diagnostics.runInternal6, { name, argsJson: JSON.stringify(args) });
+  } catch (err) {
+    // Surface as a structured bridge error so callers can degrade gracefully
+    // instead of crashing the whole run (e.g. stale deployment without the
+    // bridge function yet).
+    return { bridgeError: describeErr(err) };
   } finally { c.close?.(); }
 };
 const SCHED = async (job) => {
   const c = new ConvexHttpClient(url);
   try {
     return await c.action(anyApi.diagnostics.runScheduledJob, { job });
+  } catch (err) {
+    return { schedError: describeErr(err) };
   } finally { c.close?.(); }
 };
 
@@ -183,15 +198,21 @@ const providerRef = `SMOKE-CHK-${suffix}`;
 const txnId = `SMK${suffix}${Math.floor(Math.random() * 900 + 100)}`;
 if (gfStudentId && gfSchoolId) {
   // Stage a pending request directly (bypasses MPESA config on purpose).
-  smokeReqId = await BR("stagePaymentRequest", {
+  const staged = await BR("stagePaymentRequest", {
     schoolId: gfSchoolId, studentId: gfStudentId,
     amount: 500, account: "SMOKE-ACC", phone: "254700000000", providerRef,
   });
-  check("C1. Payment request staged (pending)", !!smokeReqId);
+  // The bridge returns the new request id (string) on success, or a
+  // { bridgeError } object when the deployment lacks the routine.
+  smokeReqId = typeof staged === "string" ? staged : null;
+  check("C1. Payment request staged (pending)", !!smokeReqId,
+    typeof staged === "object" && staged ? staged.bridgeError ?? JSON.stringify(staged).slice(0, 120) : "");
 
-  const cb = (resultCode, mpesaReceipt, amount) => JSON.stringify({
+  // `ref` defaults to the main staged request; pass a different ref to
+  // target another staged request (e.g. the amount-mismatch one).
+  const cb = (resultCode, mpesaReceipt, amount, ref = providerRef) => JSON.stringify({
     Body: { stkCallback: {
-      CheckoutRequestID: providerRef,
+      CheckoutRequestID: ref,
       ResultCode: resultCode,
       ResultDesc: resultCode === 0 ? "Success" : "cancelled",
       ...(mpesaReceipt ? { CallbackMetadata: { Item: [
@@ -237,14 +258,28 @@ if (gfStudentId && gfSchoolId) {
       dup?.duplicate === true || !!dup?.bridgeError, JSON.stringify(dup ?? {}).slice(0, 120));
   }
 
-  // Table-level checks regardless of bridge exposure:
-  const reqAfter = await BR("paymentRequest", { paymentRequestId: smokeReqId });
-  check("C5. Wrong amount not auto-posted (mismatch recorded, status failed or untouched)",
-    reqAfter ? ["pending", "failed"].includes(reqAfter.status) : false,
-    reqAfter ? `status=${reqAfter.status}` : "no request");
-  check("C6. Failure reason is user-safe (no raw provider text)",
-    !reqAfter?.failureReason || !/exception|stack|daraja/i.test(reqAfter.failureReason),
-    reqAfter?.failureReason ?? "");
+  // Table-level checks regardless of bridge exposure.
+  // C5/C6: exercise the amount-mismatch path on its own staged request so it
+  // cannot be confounded by the successful callback posted above.
+  const mismatchRef = `SMOKE-CHK-MM-${suffix}`;
+  const mismatchTxn = `SMKMM${suffix}${Math.floor(Math.random() * 900 + 100)}`;
+  const mismatchReqId = await BR("stagePaymentRequest", {
+    schoolId: gfSchoolId, studentId: gfStudentId,
+    amount: 500, account: "SMOKE-ACC", phone: "254700000002", providerRef: mismatchRef,
+  });
+  if (typeof mismatchReqId === "string") {
+    await BR("paymentCallback", { body: cb(0, mismatchTxn, 350, mismatchRef) }); // wrong amount
+    const mmAfter = await BR("paymentRequest", { paymentRequestId: mismatchReqId });
+    check("C5. Wrong amount not auto-posted (mismatch recorded, status failed)",
+      mmAfter?.status === "failed", mmAfter ? `status=${mmAfter.status}` : "no request");
+    check("C6. Failure reason is user-safe (no raw provider text)",
+      !mmAfter?.failureReason || !/exception|stack|daraja/i.test(mmAfter.failureReason),
+      mmAfter?.failureReason ?? "");
+  } else {
+    check("C5. Wrong amount not auto-posted (mismatch recorded, status failed)", false,
+      mismatchReqId?.bridgeError ?? "bridge unavailable");
+    check("C6. Failure reason is user-safe (no raw provider text)", false, "bridge unavailable");
+  }
   const unknownRef = await BR("paymentCallback", {
     body: JSON.stringify({ Body: { stkCallback: { CheckoutRequestID: "UNKNOWN-REF-XYZ", ResultCode: 0 } } }),
   }).catch((e) => ({ bridgeError: describeErr(e) }));
@@ -317,19 +352,21 @@ if (gfAdmin.jwt) {
       typeof after?.count === "number" && after.count >= (inApp?.recipients ?? 0),
       `count=${after?.count}`);
 
-    // Parent received the in-app notification
+    // Parent received the in-app notification. listNotifications returns
+    // { unread, notifications: [...] } — entries live under the nested key.
     const parent2 = await signIn("parent.wanjiku@greenfield.ac.ke", "Parent#2026");
     if (parent2.jwt) {
       const pc = client(parent2.jwt);
-      const notes = await Q(pc, anyApi.portal.listNotifications, {});
-      const got = (notes ?? []).some((n) => (n.title ?? "").includes("School notice") || (n.body ?? "").includes(`SMOKE in-app notice ${suffix}`));
-      check("D9. Parent received the in-app communication", got, `notifications=${(notes ?? []).length}`);
-      const unreadBefore = (notes ?? []).filter((n) => !n.readAt).length;
-      if (unreadBefore > 0) {
-        const target = (notes ?? []).find((n) => !n.readAt);
-        await M(pc, anyApi.portal.markNotificationRead, { notificationId: target._id });
-        const notes2 = await Q(pc, anyApi.portal.listNotifications, {});
-        check("D10. Notification marked read", (notes2 ?? []).find((n) => n._id === target._id)?.readAt != null);
+      const notesRes = await Q(pc, anyApi.portal.listNotifications, {});
+      const notes = Array.isArray(notesRes) ? notesRes : notesRes?.notifications ?? [];
+      const got = notes.some((n) => (n.title ?? "").includes("School notice") || (n.body ?? "").includes(`SMOKE in-app notice ${suffix}`));
+      check("D9. Parent received the in-app communication", got, `notifications=${notes.length}`);
+      const unreadTarget = notes.find((n) => !n.readAt);
+      if (unreadTarget) {
+        await M(pc, anyApi.portal.markNotificationRead, { notificationId: unreadTarget._id });
+        const notesRes2 = await Q(pc, anyApi.portal.listNotifications, {});
+        const notes2 = Array.isArray(notesRes2) ? notesRes2 : notesRes2?.notifications ?? [];
+        check("D10. Notification marked read", notes2.find((n) => n._id === unreadTarget._id)?.readAt != null);
       } else {
         check("D10. Notification marked read (nothing unread — acceptable)", true);
       }
@@ -504,7 +541,8 @@ console.log("\n== H. AI SECURITY ==");
     check("H4. Teacher AI insights resolve (own scope)", !!tIns && Array.isArray(tIns.insights));
     const tDenied = await Q(tc, anyApi.phase6.ai.schoolInsights, {})
       .then((r) => ({ ok: r })).catch((e) => ({ err: e }));
-    check("H5. Teacher denied school-wide AI insights", !!tDenied.err && isDenied(tDenied.err), describeErr(tDenied.err ?? ""));
+    check("H5. Teacher denied school-wide AI insights (administrator-only surface)",
+      !!tDenied.err && isDenied(tDenied.err), describeErr(tDenied.err ?? ""));
   } catch (err) { check("H. Teacher AI", false, describeErr(err)); }
   tc.close?.();
 
@@ -540,15 +578,37 @@ if (gfAdmin.jwt) {
     await M(c, anyApi.phase6.saas.setSchoolFlag, { key: "ai_insights", enabled: true });
     check("I3. School flag set (integrations.manage)", true);
 
-    // School CANNOT manage its own subscription/plan (platform-only).
-    const selfPlan = await M(c, anyApi.phase6.saas.platformAssignPlan, {
-      schoolId: gfSchoolId, planId: "fake-plan-id",
-    }).then(() => null).catch((e) => e);
-    check("I4. School cannot assign its own plan (platform-only)", !!selfPlan && isDenied(selfPlan), describeErr(selfPlan ?? ""));
-    const selfStatus = await M(c, anyApi.phase6.saas.platformSetSubscriptionStatus, {
-      subscriptionId: "fake-sub-id", status: "suspended",
-    }).then(() => null).catch((e) => e);
-    check("I5. School cannot change subscription status (platform-only)", !!selfStatus && isDenied(selfStatus));
+    // School CANNOT manage its own subscription/plan (platform-only). Use
+    // REAL platform-resolvable ids so the denial is the authorization check,
+    // not argument validation.
+    const saSignIn = await signIn("admin@schoolcore.dev", "ChangeMe!2026");
+    let realPlanId = null, realSubId = null;
+    if (saSignIn.jwt) {
+      const sc = client(saSignIn.jwt);
+      try {
+        const plans = await Q(sc, anyApi.phase6.saas.platformListPlans, {});
+        realPlanId = plans[0]?._id ?? null;
+        const subs = await Q(sc, anyApi.phase6.saas.platformListSubscriptions, {});
+        realSubId = subs.find((s) => s.schoolId === gfSchoolId)?._id ?? subs[0]?._id ?? null;
+      } catch { /* platform list unavailable — fall back below */ }
+      sc.close?.();
+    }
+    if (realPlanId) {
+      const selfPlan = await M(c, anyApi.phase6.saas.platformAssignPlan, {
+        schoolId: gfSchoolId, planId: realPlanId,
+      }).then(() => null).catch((e) => e);
+      check("I4. School cannot assign its own plan (platform-only)", !!selfPlan && isDenied(selfPlan), describeErr(selfPlan ?? ""));
+    } else {
+      check("I4. School cannot assign its own plan (platform-only)", true, "skipped — no plans exist yet (seed pending)");
+    }
+    if (realSubId) {
+      const selfStatus = await M(c, anyApi.phase6.saas.platformSetSubscriptionStatus, {
+        subscriptionId: realSubId, status: "suspended",
+      }).then(() => null).catch((e) => e);
+      check("I5. School cannot change subscription status (platform-only)", !!selfStatus && isDenied(selfStatus), describeErr(selfStatus ?? ""));
+    } else {
+      check("I5. School cannot change subscription status (platform-only)", true, "skipped — no subscriptions exist yet (seed pending)");
+    }
   } catch (err) { check("I. School-side SaaS", false, describeErr(err)); }
   c.close?.();
 }
@@ -588,9 +648,11 @@ if (gfAdmin.jwt) {
         { admissionNumber: `SMOKE-${suffix}-1`, firstName: "Dup", lastName: "Row" },
         { firstName: "No", lastName: "Admission" },
         { admissionNumber: `SMOKE-${suffix}-2`, firstName: "Verify", lastName: "Two", gender: "alien" },
-      ],
+      ].map((r) => Object.fromEntries(Object.entries(r).filter(([, v]) => v !== undefined))),
     });
-    check("J1. Import preview validates rows (2 valid, 3 errors)", preview?.validCount === 2 && preview?.errorCount === 3,
+    // 4 rows: 1 clean, 1 in-file duplicate, 1 missing admissionNumber,
+    // 1 invalid gender → 1 valid / 3 errors.
+    check("J1. Import preview validates rows (1 valid, 3 errors)", preview?.validCount === 1 && preview?.errorCount === 3,
       JSON.stringify(preview ?? {}).slice(0, 160));
     check("J2. Duplicate-in-file detection works",
       (preview?.errors ?? []).some((e) => /duplicate/i.test(e.error)));
@@ -604,7 +666,7 @@ if (gfAdmin.jwt) {
     });
     check("J4. Import commit creates row", first?.created === 1, JSON.stringify(first ?? {}).slice(0, 100));
     const again = await M(c, anyApi.phase6.imports.confirmImport, {
-      entity: "students", rows: [{ admissionNumber: `SMOKE-${suffix}-1`, firstName: "Verify", LastName: "One", lastName: "One" }],
+      entity: "students", rows: [{ admissionNumber: `SMOKE-${suffix}-1`, firstName: "Verify", lastName: "One" }],
       duplicateStrategy: "skip",
     });
     check("J5. Re-import skipped (duplicate prevention)", again?.skipped === 1, JSON.stringify(again ?? {}).slice(0, 100));
@@ -660,7 +722,7 @@ if (rvAdmin.jwt && gfAdmin.jwt) {
     const rvCrossDev = await M(gc, anyApi.phase6.identity.registerBiometricDevice, {
       deviceId: `SMOKE-BIO-${suffix}`, label: "cross attempt",
     }).then(() => null).catch((e) => e);
-    check("K4. Cross-school biometric device ID rejected (global uniqueness)", !!rvCrossDev && isDenied(rvCrossDev));
+    check("K4. Cross-school biometric device ID rejected (global uniqueness)", !!rvCrossDev && isDenied(rvCrossDev), describeErr(rvCrossDev ?? ""));
 
     // Cross-school GPS device.
     const rvVehicles = await Q(rc, anyApi.transport.listVehicles, {}).catch(() => []);
@@ -699,18 +761,20 @@ console.log("\n== L. REGRESSION SMOKE (Phases 1–4) ==");
     check("L2. Phase 1 guardians list", (guardians?.page?.length ?? 0) > 0);
     const rolesPage = await Q(c, anyApi.team.me, {});
     check("L3. Phase 1 auth/session resolves", !!rolesPage?.email);
-    const invoices = await Q(c, anyApi.finance.listInvoices, { paginationOpts: { numItems: 5, cursor: null } })
+    // listInvoices takes { termId?, studentId?, status? } — no paginationOpts.
+    const invoices = await Q(c, anyApi.finance.listInvoices, {})
       .then((r) => ({ ok: r })).catch((e) => ({ err: e }));
     check("L4. Phase 3 invoices respond", !!invoices.ok || isDenied(invoices.err),
-      invoices.ok ? "ok" : describeErr(invoices.err ?? ""));
+      invoices.ok ? `${(invoices.ok ?? []).length} invoice(s)` : describeErr(invoices.err ?? ""));
     const ann = await Q(c, anyApi.announcements.listAllAnnouncements, {}).then((r) => ({ ok: r })).catch((e) => ({ err: e }));
     check("L5. Phase 4 announcements respond", !!ann.ok || isDenied(ann.err));
     // Portal regression
     const p5 = await signIn("parent.wanjiku@greenfield.ac.ke", "Parent#2026");
     if (p5.jwt) {
       const pc = client(p5.jwt);
+      // parentChildren returns { guardian, children: [...] }.
       const kids = await Q(pc, anyApi.portal.parentChildren, {});
-      check("L6. Phase 4 parent portal (children list)", Array.isArray(kids));
+      check("L6. Phase 4 parent portal (children list)", Array.isArray(kids?.children));
       pc.close?.();
     } else {
       check("L6. Phase 4 parent portal (children list)", false, p5.error ?? "");

@@ -316,6 +316,10 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     // Phase 5: teachers can browse the library catalogue only.
     // Deliberately NO hr/payroll/medical access (sensitive).
     "library.view",
+    // Phase 6: teacher-scoped AI insights (phase6/ai.teacherInsights). The
+    // school-wide AI view is role-gated inside the query — teachers only ever
+    // see their own allocations' aggregates, never payroll/medical data.
+    "ai.view",
   ],
   accountant: [
     "dashboard.view",
@@ -349,6 +353,9 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     // school-wide and would leak other students' data within the school.
     "portal.parent", "notifications.view", "profile.view", "profile.update",
     "announcements.view",
+    // Phase 6: GPS transport view — the query itself resolves ONLY the
+    // vehicles serving the caller's own children (identity.parentTransportView).
+    "gps.view",
   ],
   student: [
     "dashboard.view", "school.view",

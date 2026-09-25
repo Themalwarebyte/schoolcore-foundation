@@ -852,6 +852,76 @@ const FINANCE_ACCOUNTS: Array<{ code: string; name: string; accountType: string 
   { code: "5000", name: "Operating Expenses", accountType: "expense" },
 ];
 
+/**
+ * Phase 6 — SaaS plan catalog + demo subscriptions (platform-level, not
+ * per-school). Idempotent: keyed on plan slug. Entitlements follow the
+ * spec's Starter/Growth/Enterprise tiers; schools are subscribed on the
+ * plan matching their seed profile (Riverside Starter, Greenfield Growth).
+ */
+export const seedSaas = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const plans = [
+      {
+        slug: "starter",
+        name: "Starter",
+        description: "Core academics + attendance + basic finance.",
+        monthlyPrice: 149,
+        currency: "USD",
+        displayOrder: 1,
+        entitlements: { maxStudents: 300, maxAdmins: 3, sms: false, email: true, gps: false, ai: false, advancedAnalytics: false, paymentsExternal: false },
+      },
+      {
+        slug: "growth",
+        name: "Growth",
+        description: "Everything in Starter plus payments, GPS and AI insights.",
+        monthlyPrice: 399,
+        currency: "USD",
+        displayOrder: 2,
+        entitlements: { maxStudents: 1500, maxAdmins: 10, sms: true, email: true, gps: true, ai: true, advancedAnalytics: false, paymentsExternal: true },
+      },
+      {
+        slug: "enterprise",
+        name: "Enterprise",
+        description: "Unlimited scale, advanced analytics and every integration.",
+        monthlyPrice: 899,
+        currency: "USD",
+        displayOrder: 3,
+        entitlements: { maxStudents: 100000, maxAdmins: 100, sms: true, email: true, gps: true, ai: true, advancedAnalytics: true, paymentsExternal: true },
+      },
+    ];
+    for (const p of plans) {
+      const existing = await ctx.db.query("plans").withIndex("by_slug", (q) => q.eq("slug", p.slug)).first();
+      if (!existing) {
+        await ctx.db.insert("plans", {
+          name: p.name, slug: p.slug, description: p.description,
+          monthlyPrice: p.monthlyPrice, currency: p.currency,
+          entitlements: p.entitlements, displayOrder: p.displayOrder, active: true,
+          createdAt: Date.now(),
+        });
+      }
+    }
+
+    // Demo subscriptions per school (idempotent by by_school).
+    const schools = await ctx.db.query("schools").collect();
+    for (const school of schools) {
+      const sub = await ctx.db
+        .query("schoolSubscriptions")
+        .withIndex("by_school", (q) => q.eq("schoolId", school._id))
+        .first();
+      if (sub) continue;
+      const planSlug = school.code === "RVS-002" ? "starter" : "growth";
+      const plan = await ctx.db.query("plans").withIndex("by_slug", (q) => q.eq("slug", planSlug)).first();
+      if (!plan) continue;
+      await ctx.db.insert("schoolSubscriptions", {
+        schoolId: school._id, planId: plan._id, status: "active",
+        startedAt: Date.now(), updatedAt: Date.now(),
+      });
+    }
+    return { ok: true as const };
+  },
+});
+
 export const seedFinance = internalMutation({
   args: {},
   handler: async (ctx) => {
