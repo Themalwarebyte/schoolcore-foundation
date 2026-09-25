@@ -9,13 +9,14 @@ import {
   DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  LayoutDashboard, School, Users, ScrollText, ChevronLeft, LogOut, Loader2, Globe,
+  LayoutDashboard, School, Users, ScrollText, ChevronLeft, LogOut, Loader2, Globe, UserPlus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuthActions } from "@convex-dev/auth/react";
 
 const NAV = [
   { to: "/platform", label: "Platform Dashboard", icon: LayoutDashboard, exact: true },
+  { to: "/platform/school-requests", label: "School Requests", icon: UserPlus, exact: false },
   { to: "/platform/schools", label: "Schools", icon: School, exact: false },
   { to: "/platform/users", label: "Platform Users", icon: Users, exact: false },
   { to: "/platform/activity", label: "Audit / Activity", icon: ScrollText, exact: false },

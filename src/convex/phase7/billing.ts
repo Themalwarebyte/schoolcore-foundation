@@ -119,9 +119,30 @@ export async function invoiceVoteheadBreakdown(
 ): Promise<VoteheadLine[]> {
   const items = await ctx.db.query("invoiceItems").withIndex("by_invoice", (q) => q.eq("invoiceId", invoiceId)).collect();
   const allocations = await ctx.db.query("paymentAllocations").withIndex("by_invoice", (q) => q.eq("invoiceId", invoiceId)).collect();
+  // Resolve votehead names for item categories: a fee category may map to a
+  // differently-named votehead (e.g. category "Meals" → votehead "Lunch").
+  const voteheads = await ctx.db.query("feeVoteheads").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).collect();
+  const ALIASES: Record<string, string> = {
+    meals: "Lunch", meal: "Lunch", lunch: "Lunch",
+    tuition: "Tuition", transport: "Transport", boarding: "Boarding",
+    activity: "Activity", examination: "Examination", uniform: "Uniform",
+    milk: "Milk", snack: "Snack", swimming: "Swimming", infrastructure: "Infrastructure",
+    other: "(Unassigned)", "": "(Unassigned)",
+  };
+  const resolveName = (raw: string): string => {
+    const key = raw.trim().toLowerCase();
+    const alias = ALIASES[key];
+    if (alias) {
+      // Prefer an actual configured votehead with that name.
+      const vh = voteheads.find((v) => v.name.toLowerCase() === alias.toLowerCase());
+      return vh ? vh.name : alias;
+    }
+    const vh = voteheads.find((v) => v.name.toLowerCase() === key);
+    return vh ? vh.name : (raw.trim() || "(Unassigned)");
+  };
   const map = new Map<string, VoteheadLine>();
   for (const item of items) {
-    const key = item.category || "(Unassigned)";
+    const key = resolveName(item.category ?? "");
     const line = map.get(key) ?? { voteheadName: key, voteheadId: null, billed: 0, allocated: 0, balance: 0 };
     line.billed = round2(line.billed + item.quantity * item.amount);
     map.set(key, line);

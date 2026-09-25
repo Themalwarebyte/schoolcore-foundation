@@ -313,6 +313,25 @@ registered in `src/convex/crons.ts` (overdue invoices, library overdue,
 contract expiry, stock alerts, GPS ping retention) and execute automatically —
 no manual triggering is required in production.
 
+**Phase 7 commercial suite** (`scripts/phase7-verify.mjs`) — public school
+registration + validation, platform review/approval workflow (workspace
+provisioning), onboarding wizard (profile, academics, initial users via
+invitations, activation guard), invitations & one-time tokens (invite →
+self-set password → one-time-use enforcement → admin reset), admissions
+(application → review → assessment → decision → conversion with guardian
+dedupe), promotion validation guards + history, fee voteheads + payment
+allocation (priority order, partial payments, manual allocation, over-
+allocation rejection, audit trail), bank statement import (staging, auto-
+match, duplicate-reference flagging, discard, posting guards), meals (plans,
+eligibility, duplicate-consumption guard, QR meal card, parent child-scoped
+view), access management, and tenant isolation across every Phase 7 module:
+
+```bash
+bun scripts/phase7-verify.mjs https://<deployment>.convex.cloud
+```
+
+93 checks; all SMOKE-prefixed, idempotent on re-run.
+
 ## Security notes
 
 - A previously committed `.env.keys` (containing a `DOTENV_PRIVATE_KEY_LOCAL`)

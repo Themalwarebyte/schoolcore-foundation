@@ -12,6 +12,7 @@ import { mutation, query } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { requirePermission } from "../session";
 import { recordAudit } from "../audit";
+import { inviteUser } from "./invitations";
 
 /* ------------------------------------------------------------------ */
 /* Read                                                                */
@@ -247,7 +248,6 @@ export const inviteInitialUsers = mutation({
     const session = await requirePermission(ctx, "onboarding.manage");
     const schoolId = session.schoolId as Id<"schools">;
     if (users.length === 0) throw new ConvexError("Add at least one initial user.");
-    const { inviteUser } = await import("./invitations");
     const results: Array<{ email: string; invitationId: Id<"invitations"> }> = [];
     for (const u of users) {
       const id = await inviteUser(ctx, {
