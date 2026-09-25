@@ -73,7 +73,12 @@ export function roleLabel(role: SessionRole): string {
   return ROLE_LABEL[role] ?? role;
 }
 
-/** Client-side permission mirror (server remains the source of truth). */
+/**
+ * Client-side permission mirror (the server remains the source of truth —
+ * every backend call re-checks permissions). This copy only decides which
+ * nav links and inline UI blocks render; keep it aligned with ROLE_PERMISSIONS
+ * in src/convex/schema.ts.
+ */
 const ROLE_PERMISSIONS: Record<SessionRole, string[]> = {
   super_admin: ["*"],
   school_admin: [
@@ -102,6 +107,9 @@ const ROLE_PERMISSIONS: Record<SessionRole, string[]> = {
     "discounts.manage", "scholarships.manage",
     "expenses.create", "expenses.approve",
     "financial_reports.view",
+    // Phase 4: portals & communication
+    "announcements.view", "announcements.create", "announcements.publish", "announcements.manage",
+    "notifications.view", "profile.view", "profile.update",
   ],
   principal: [
     "dashboard.view", "school.view", "school.update", "students.view", "students.create",
@@ -167,6 +175,37 @@ const ROLE_PERMISSIONS: Record<SessionRole, string[]> = {
     "notifications.view", "profile.view",
   ],
 };
+
+/**
+ * Non-academic permission grants (Phase 5–7 modules) appended to school_admin.
+ * Mirrors the "Phase 5/6/7" blocks of ROLE_PERMISSIONS in src/convex/schema.ts,
+ * which remains the source of truth — this client copy only controls what nav
+ * links render; the server re-checks every call.
+ */
+const SCHOOL_ADMIN_EXTENSIONS = [
+  // Phase 5: operations ERP
+  "hr.view", "hr.manage", "employees.create", "employees.update", "contracts.manage",
+  "leave.view", "leave.manage", "leave.approve",
+  "payroll.view", "payroll.manage",
+  "library.view", "library.manage", "transport.view", "transport.manage",
+  "boarding.view", "boarding.manage", "inventory.view", "inventory.manage",
+  "procurement.view", "procurement.manage", "medical.view", "medical.manage",
+  // Phase 6: integrations, automation, comms, ids, data ops
+  "integrations.view", "integrations.manage",
+  "payments_external.view", "payments_external.manage", "payments_external.reconcile",
+  "communications.view", "communications.manage",
+  "automations.view", "automations.manage",
+  "qr.view", "qr.manage", "biometrics.view", "biometrics.manage",
+  "gps.view", "gps.manage", "ai.view", "data.import", "data.export",
+  // Phase 7: onboarding, admissions, billing depth
+  "onboarding.view", "onboarding.manage",
+  "admissions.view", "admissions.manage", "admissions.decide",
+  "promotions.manage", "billing.voteheads.manage",
+  "payments.allocate", "payments.reconcile",
+  "bank_imports.view", "bank_imports.manage",
+  "meals.view", "meals.manage", "meals.consume",
+];
+ROLE_PERMISSIONS.school_admin.push(...SCHOOL_ADMIN_EXTENSIONS);
 
 export function usePermissions() {
   const { role } = useSession();

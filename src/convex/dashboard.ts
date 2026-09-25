@@ -1,4 +1,4 @@
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { requirePermission } from "./session";
@@ -85,6 +85,88 @@ export const overview = query({
         admissionNumber: s.admissionNumber,
         studentStatus: s.studentStatus,
       })),
+    };
+  },
+});
+
+/* ------------------------------------------------------------------ */
+/* First-time setup checklist (lives under onboarding records;         */
+/* auto-derives steps so schools see progress without running the      */
+/* wizard explicitly).                                                 */
+/* ------------------------------------------------------------------ */
+
+export const setupChecklist = query({
+  args: {},
+  handler: async (ctx) => {
+    const session = await requirePermission(ctx, "dashboard.view");
+    if (!session.schoolId) throw new ConvexError("Select a school to continue.");
+    const schoolId = session.schoolId as Id<"schools">;
+
+    const [school, years, sections, students, staff] = await Promise.all([
+      ctx.db.get(schoolId),
+      ctx.db.query("academicYears").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).collect(),
+      ctx.db.query("classSections").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).collect(),
+      ctx.db.query("students").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).collect(),
+      ctx.db.query("staff").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).collect(),
+    ]);
+    const currentYear = years.find((y) => y.isCurrent) ?? null;
+    const [feeMethods, categories, parentLinks] = await Promise.all([
+      ctx.db.query("paymentMethods").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).collect(),
+      ctx.db.query("feeCategories").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).collect(),
+      ctx.db.query("guardianStudents").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).collect(),
+    ]);
+    const wizard = await ctx.db
+      .query("onboardingRecords")
+      .withIndex("by_school", (q) => q.eq("schoolId", schoolId))
+      .first();
+
+    const steps = [
+      { key: "profile", label: "School profile complete", done: !!(school?.phone || school?.physicalAddress || school?.email) || !!wizard?.profileDone },
+      { key: "academics", label: "Academic year & classes created", done: (!!currentYear && sections.length > 0) || !!wizard?.academicsDone },
+      { key: "staff", label: "Teachers & staff added", done: staff.length > 0 || !!wizard?.usersDone },
+      { key: "students", label: "Students enrolled", done: students.length > 0 || !!wizard?.importDone },
+      { key: "finance", label: "Finance configured (fee categories & payment methods)", done: categories.length > 0 && feeMethods.length > 0 },
+      { key: "parents", label: "Guardians linked to students", done: parentLinks.length > 0 },
+      { key: "activate", label: "School activated", done: school?.status === "active" },
+    ];
+    const done = steps.filter((s) => s.done).length;
+    return {
+      steps,
+      doneCount: done,
+      total: steps.length,
+      percent: Math.round((done / steps.length) * 100),
+      isComplete: done === steps.length,
+    };
+  },
+});
+
+/* ------------------------------------------------------------------ */
+/* Attention required: pending work that needs an administrator         */
+/* ------------------------------------------------------------------ */
+
+export const attention = query({
+  args: {},
+  handler: async (ctx) => {
+    const session = await requirePermission(ctx, "dashboard.view");
+    if (!session.schoolId) throw new ConvexError("Select a school to continue.");
+    const schoolId = session.schoolId as Id<"schools">;
+
+    const [overdue, admissions, leave, expenses, incompleteStudents] = await Promise.all([
+      ctx.db.query("invoices").withIndex("by_school_status", (q) => q.eq("schoolId", schoolId).eq("status", "overdue")).collect(),
+      ctx.db.query("applications").withIndex("by_school_status", (q) => q.eq("schoolId", schoolId).eq("status", "submitted")).collect(),
+      ctx.db.query("leaveRequests").withIndex("by_school_status", (q) => q.eq("schoolId", schoolId).eq("status", "pending")).collect(),
+      ctx.db.query("expenses").withIndex("by_school_status", (q) => q.eq("schoolId", schoolId).eq("status", "submitted")).collect(),
+      ctx.db.query("students").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).collect(),
+    ]);
+
+    return {
+      overdueInvoices: overdue.length,
+      pendingAdmissions: admissions.length,
+      pendingLeave: leave.length,
+      pendingExpenses: expenses.length,
+      incompleteStudents: incompleteStudents.filter(
+        (s) => !s.dateOfBirth || !s.gender || !s.admissionDate,
+      ).length,
     };
   },
 });
