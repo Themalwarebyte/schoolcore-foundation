@@ -13,7 +13,7 @@ import {
 import {
   LayoutDashboard, Users, UserRound, GraduationCap, CalendarRange, CalendarDays,
   Layers, Grid3X3, BookOpen, UserCog, KeyRound, ScrollText, Settings, School,
-  ChevronLeft, LogOut, Loader2, ShieldAlert, ClipboardList,
+  ChevronLeft, LogOut, Loader2, ShieldAlert, ClipboardList, Menu,
   CalendarCheck, Clock, FileEdit, ClipboardCheck, SlidersHorizontal, Award,
   FileSpreadsheet, TrendingUp, Bell, Landmark, Wallet, Receipt, HandCoins, PieChart,
   Megaphone,
@@ -22,6 +22,7 @@ import {
   // Phase 7 icons
   UserPlus, ArrowUpRight, UtensilsCrossed, Landmark as LandmarkIcon, ShieldCheck, ListChecks,
 } from "lucide-react";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { useAuthActions } from "@convex-dev/auth/react";
 
@@ -64,7 +65,7 @@ const NAV: NavGroup[] = [
     ],
   },
   {
-    heading: "Operations",
+    heading: "Teaching & Learning",
     items: [
       { to: "/attendance", label: "Attendance", icon: CalendarCheck, permission: "attendance.view" },
       { to: "/timetable", label: "Timetable", icon: Clock, permission: "timetable.view" },
@@ -91,15 +92,15 @@ const NAV: NavGroup[] = [
     ],
   },
   {
-    heading: "Phase 7 — Commercial",
+    heading: "Growth & Billing",
     items: [
       { to: "/admissions", label: "Admissions", icon: UserPlus, permission: "admissions.view" },
       { to: "/promotions", label: "Promotions", icon: ArrowUpRight, permission: "promotions.manage" },
-      { to: "/finance/voteheads", label: "Fee Voteheads", icon: ListChecks, permission: "billing.voteheads.manage" },
+      { to: "/finance/voteheads", label: "Fee Items", icon: ListChecks, permission: "billing.voteheads.manage" },
       { to: "/finance/reconciliation", label: "Reconciliation", icon: LandmarkIcon, permission: "payments.reconcile" },
       { to: "/finance/bank-imports", label: "Bank Imports", icon: FileSpreadsheet, permission: "bank_imports.view" },
       { to: "/meals", label: "Meals", icon: UtensilsCrossed, permission: "meals.view" },
-      { to: "/onboarding", label: "Onboarding", icon: ListChecks, permission: "onboarding.view" },
+      { to: "/onboarding", label: "School Setup", icon: ListChecks, permission: "onboarding.view" },
       { to: "/access", label: "Access Management", icon: ShieldCheck, permission: "users.view" },
     ],
   },
@@ -122,7 +123,7 @@ const NAV: NavGroup[] = [
       { to: "/users", label: "Users", icon: UserCog, permission: "users.view" },
       { to: "/portal-access", label: "Portal Access", icon: UserCog, permission: "users.view" },
       { to: "/roles", label: "Roles & Permissions", icon: KeyRound, permission: "roles.manage" },
-      { to: "/audit", label: "Audit Logs", icon: ScrollText, permission: "audit_logs.view" },
+      { to: "/audit", label: "Activity Log", icon: ScrollText, permission: "audit_logs.view" },
     ],
   },
   {
@@ -134,12 +135,70 @@ const NAV: NavGroup[] = [
   },
 ];
 
+/** Shared nav renderer (sidebar + mobile drawer). */
+function SidebarNav({
+  collapsed, onNavigate, onToggleCollapse,
+}: { collapsed: boolean; onNavigate?: () => void; onToggleCollapse?: () => void }) {
+  const { can } = usePermissions();
+  return (
+    <>
+      <nav className="flex-1 overflow-y-auto px-2 py-3">
+        {NAV.map((group) => {
+          const items = group.items.filter((i) => can(i.permission));
+          if (items.length === 0) return null;
+          return (
+            <div key={group.heading} className="mb-3">
+              {!collapsed && (
+                <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {group.heading}
+                </p>
+              )}
+              <div className="space-y-0.5">
+                {items.map((item) => (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    title={collapsed ? item.label : undefined}
+                    onClick={onNavigate}
+                    className={({ isActive }) =>
+                      cn(
+                        "flex items-center gap-2.5 rounded-md px-2 py-2 text-sm font-medium transition-colors",
+                        isActive
+                          ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                          : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+                        collapsed && "justify-center px-0",
+                      )
+                    }
+                  >
+                    <item.icon className="size-4 shrink-0" />
+                    {!collapsed && <span className="truncate">{item.label}</span>}
+                  </NavLink>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </nav>
+      {onToggleCollapse && (
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          className="flex h-10 items-center justify-center border-t text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-foreground"
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          <ChevronLeft className={cn("size-4 transition-transform", collapsed && "rotate-180")} />
+        </button>
+      )}
+    </>
+  );
+}
+
 export function SchoolLayout() {
   const { isLoading, isAuthenticated, session, schoolMembership } = useSession();
-  const { can } = usePermissions();
   const { signOut } = useAuthActions();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const school = useQuery(
     api.schools.getMySchool,
@@ -189,7 +248,7 @@ export function SchoolLayout() {
     <div className="flex min-h-screen bg-background">
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-30 flex flex-col border-r bg-sidebar text-sidebar-foreground transition-all duration-200",
+          "fixed inset-y-0 left-0 z-30 hidden flex-col border-r bg-sidebar text-sidebar-foreground transition-all duration-200 lg:flex",
           collapsed ? "w-16" : "w-64",
         )}
       >
@@ -204,54 +263,38 @@ export function SchoolLayout() {
             </div>
           )}
         </div>
-        <nav className="flex-1 overflow-y-auto px-2 py-3">
-          {NAV.map((group) => {
-            const items = group.items.filter((i) => can(i.permission));
-            if (items.length === 0) return null;
-            return (
-              <div key={group.heading} className="mb-3">
-                {!collapsed && (
-                  <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    {group.heading}
-                  </p>
-                )}
-                <div className="space-y-0.5">
-                  {items.map((item) => (
-                    <NavLink
-                      key={item.to}
-                      to={item.to}
-                      title={collapsed ? item.label : undefined}
-                      className={({ isActive }) =>
-                        cn(
-                          "flex items-center gap-2.5 rounded-md px-2 py-2 text-sm font-medium transition-colors",
-                          isActive
-                            ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                            : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
-                          collapsed && "justify-center px-0",
-                        )
-                      }
-                    >
-                      <item.icon className="size-4 shrink-0" />
-                      {!collapsed && <span className="truncate">{item.label}</span>}
-                    </NavLink>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </nav>
-        <button
-          type="button"
-          onClick={() => setCollapsed((v) => !v)}
-          className="flex h-10 items-center justify-center border-t text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-foreground"
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          <ChevronLeft className={cn("size-4 transition-transform", collapsed && "rotate-180")} />
-        </button>
+        <SidebarNav
+          collapsed={collapsed}
+          onToggleCollapse={() => setCollapsed((v) => !v)}
+        />
       </aside>
 
-      <div className={cn("flex min-h-screen w-full flex-col transition-all duration-200", collapsed ? "pl-16" : "pl-64")}>
+      {/* Mobile nav drawer — hidden lg:flex desktop sidebar above */}
+      <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+        <SheetContent side="left" className="w-72 bg-sidebar p-0 text-sidebar-foreground [&>button]:bg-background [&>button]:rounded-full">
+          <SheetTitle className="sr-only">Navigation</SheetTitle>
+          <div className="flex h-14 items-center gap-2 border-b px-4">
+            <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+              <School className="size-4" />
+            </div>
+            <p className="truncate text-sm font-semibold">{school?.name ?? "School"}</p>
+          </div>
+          <div className="flex h-[calc(100%-3.5rem)] flex-col">
+            <SidebarNav collapsed={false} onNavigate={() => setMobileNavOpen(false)} />
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <div className={cn("flex min-h-screen w-full flex-col transition-all duration-200", collapsed ? "lg:pl-16" : "lg:pl-64", "pl-0")}>
         <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b bg-background/95 px-4 backdrop-blur sm:px-6">
+          <button
+            type="button"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border lg:hidden"
+            onClick={() => setMobileNavOpen(true)}
+            aria-label="Open navigation"
+          >
+            <Menu className="size-4" />
+          </button>
           <div className="flex-1" />
           <GlobalSearch />
           <DropdownMenu>
