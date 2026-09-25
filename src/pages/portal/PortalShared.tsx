@@ -3,6 +3,7 @@ import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -184,7 +185,7 @@ export function PortalProfile() {
                       toast.success("Contact details updated");
                     } catch (err) {
                       toast.error("Could not save your changes.", {
-                        description: err instanceof Error ? err.message : undefined,
+                        description: undefined,
                       });
                     } finally {
                       setSaving(false);

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -94,7 +95,7 @@ export default function AcademicSettings() {
                   });
                   toast.success("Academic settings saved");
                 } catch (err) {
-                  toast.error("Unable to save settings.", { description: err instanceof Error ? err.message : undefined });
+                  toast.error("Unable to save settings.", { description: friendlyError(err) });
                 } finally {
                   setSaving(false);
                 }

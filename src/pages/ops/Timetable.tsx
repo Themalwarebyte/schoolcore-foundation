@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader } from "@/components/layouts/school-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -156,7 +157,7 @@ function GridView({ canManage, canPublish }: { canManage: boolean; canPublish: b
                   const count = await publish({ academicYearId: (yearId || undefined) as never });
                   toast.success(`Timetable published (${count} entries)`);
                 } catch (err) {
-                  toast.error("Unable to publish.", { description: err instanceof Error ? err.message : undefined });
+                  toast.error("Unable to publish.", { description: friendlyError(err) });
                 }
               }}
             >
@@ -288,7 +289,7 @@ function EntryDialog({
       toast.success("Lesson added to timetable");
       onOpenChange(false);
     } catch (err) {
-      toast.error("Unable to add lesson.", { description: err instanceof Error ? err.message : undefined });
+      toast.error("Unable to add lesson.", { description: friendlyError(err) });
     } finally {
       setSaving(false);
     }
@@ -440,7 +441,7 @@ function PeriodsView({ canManage }: { canManage: boolean }) {
                   toast.success("Periods saved");
                   setRows(null);
                 } catch (err) {
-                  toast.error("Unable to save periods.", { description: err instanceof Error ? err.message : undefined });
+                  toast.error("Unable to save periods.", { description: friendlyError(err) });
                 }
               }}
             >
@@ -576,7 +577,7 @@ function RoomsView({ canManage }: { canManage: boolean }) {
                   setOpen(false);
                   setName(""); setCode(""); setCapacity("");
                 } catch (err) {
-                  toast.error("Unable to add room.", { description: err instanceof Error ? err.message : undefined });
+                  toast.error("Unable to add room.", { description: friendlyError(err) });
                 }
               }}
             >

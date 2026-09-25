@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader } from "@/components/layouts/school-layout";
 import { HelpHint } from "@/components/shared/help-hint";
 import { DataTable } from "@/components/shared/data-table";
@@ -159,13 +160,3 @@ export default function Voteheads() {
   );
 }
 
-/** Convert backend failures into user-friendly toast text. */
-function friendlyError(err: unknown): string {
-  const raw = err instanceof Error ? err.message : String(err ?? "");
-  const m = raw.match(/Uncaught ConvexError: (.+?)(?:\n|$)/);
-  const core = (m ? m[1] : raw)
-    .replace(/^\[Request ID: [^\]]+\]\s*/, "")
-    .replace(/\s+at .*/g, "")
-    .trim();
-  return core.length > 0 ? core.slice(0, 180) : "Something went wrong. Please try again.";
-}

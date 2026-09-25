@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader } from "@/components/layouts/school-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -117,7 +118,7 @@ function RevokeButton({ linkId }: { linkId: string }) {
           toast.success("Portal access revoked");
         } catch (err) {
           toast.error("Could not revoke access.", {
-            description: err instanceof Error ? err.message : undefined,
+            description: undefined,
           });
         } finally {
           setBusy(false);
@@ -169,7 +170,7 @@ function InviteParentCard() {
             setOpen(false);
           } catch (err) {
             toast.error("Could not create the parent account.", {
-              description: err instanceof Error ? err.message : undefined,
+              description: undefined,
             });
           } finally {
             setBusy(false);
@@ -220,7 +221,7 @@ function InviteStudentCard() {
             setOpen(false);
           } catch (err) {
             toast.error("Could not create the student account.", {
-              description: err instanceof Error ? err.message : undefined,
+              description: undefined,
             });
           } finally {
             setBusy(false);

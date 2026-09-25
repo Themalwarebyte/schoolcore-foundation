@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -195,7 +196,7 @@ function StatusActions({ id, status }: { id: string; status: string }) {
       await setStatus({ assessmentId: id as never, status: next });
       toast.success(ok);
     } catch (err) {
-      toast.error("Action failed.", { description: err instanceof Error ? err.message : undefined });
+      toast.error("Action failed.", { description: friendlyError(err) });
     }
   };
   if (status === "draft") {
@@ -322,7 +323,7 @@ function CreateDialog({
                 toast.success("Assessment created");
                 onOpenChange(false);
               } catch (err) {
-                toast.error("Unable to create assessment.", { description: err instanceof Error ? err.message : undefined });
+                toast.error("Unable to create assessment.", { description: friendlyError(err) });
               } finally {
                 setSaving(false);
               }
@@ -417,7 +418,7 @@ function MarksGrid({
       toast.success(`Saved (${res.changed} changed)`);
       setSeeded(null);
     } catch (err) {
-      toast.error("Unable to save marks.", { description: err instanceof Error ? err.message : undefined });
+      toast.error("Unable to save marks.", { description: friendlyError(err) });
     } finally {
       setSaving(false);
     }
@@ -437,7 +438,7 @@ function MarksGrid({
       toast.success(`Results submitted for approval (${r.count} students)`);
       setSeeded(null);
     } catch (err) {
-      toast.error("Unable to submit results.", { description: err instanceof Error ? err.message : undefined });
+      toast.error("Unable to submit results.", { description: friendlyError(err) });
     } finally {
       setSaving(false);
     }

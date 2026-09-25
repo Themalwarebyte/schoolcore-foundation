@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader } from "@/components/layouts/platform-layout";
 import { DataTable } from "@/components/shared/data-table";
 import { Badge } from "@/components/ui/badge";
@@ -130,7 +131,7 @@ function CreateSchoolDialog({ open, onOpenChange }: { open: boolean; onOpenChang
       onOpenChange(false);
       setForm({ name: "", code: "", phone: "", email: "", county: "", country: "Kenya", timezone: "Africa/Nairobi", curriculum: "Competency Based Curriculum (CBC)", adminName: "", adminEmail: "", adminPassword: "" });
     } catch (err) {
-      toast.error("Unable to create the school.", { description: err instanceof Error ? err.message : undefined });
+      toast.error("Unable to create the school.", { description: friendlyError(err) });
     } finally {
       setSaving(false);
     }

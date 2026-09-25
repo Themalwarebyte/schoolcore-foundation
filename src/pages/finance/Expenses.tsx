@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -51,7 +52,7 @@ export default function Expenses() {
       setOpen(false);
       setCategory(""); setPayee(""); setAmount(""); setDescription("");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed");
+      toast.error(friendlyError(err));
     } finally {
       setSaving(false);
     }
@@ -109,7 +110,7 @@ export default function Expenses() {
                         <Can permission="expenses.create">
                           <Button size="sm" variant="outline" onClick={async () => {
                             try { await submitExpense({ expenseId: e._id as never }); toast.success("Submitted for approval"); }
-                            catch (err) { toast.error(err instanceof Error ? err.message : "Failed"); }
+                            catch (err) { toast.error(friendlyError(err)); }
                           }}>
                             <Send className="size-3.5" /> Submit
                           </Button>
@@ -119,7 +120,7 @@ export default function Expenses() {
                         <Can permission="expenses.approve">
                           <Button size="sm" variant="outline" onClick={async () => {
                             try { await approveExpense({ expenseId: e._id as never }); toast.success("Expense approved"); }
-                            catch (err) { toast.error(err instanceof Error ? err.message : "Failed"); }
+                            catch (err) { toast.error(friendlyError(err)); }
                           }}>
                             <Check className="size-3.5" /> Approve
                           </Button>
@@ -127,7 +128,7 @@ export default function Expenses() {
                             const r = window.prompt("Rejection reason:");
                             if (!r) return;
                             try { await rejectExpense({ expenseId: e._id as never, reason: r }); toast.success("Expense rejected"); }
-                            catch (err) { toast.error(err instanceof Error ? err.message : "Failed"); }
+                            catch (err) { toast.error(friendlyError(err)); }
                           }}>
                             <X className="size-3.5" />
                           </Button>
@@ -137,7 +138,7 @@ export default function Expenses() {
                         <Can permission="expenses.approve">
                           <Button size="sm" variant="outline" onClick={async () => {
                             try { await payExpense({ expenseId: e._id as never }); toast.success("Expense paid and posted to the ledger"); }
-                            catch (err) { toast.error(err instanceof Error ? err.message : "Failed"); }
+                            catch (err) { toast.error(friendlyError(err)); }
                           }}>
                             Mark paid
                           </Button>

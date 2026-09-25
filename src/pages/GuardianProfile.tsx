@@ -3,6 +3,7 @@ import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Link, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -117,7 +118,7 @@ function ChildRow({ child, guardianId }: { child: { linkId: string; _id: string;
                   await unlink({ linkId: child.linkId as never });
                   toast.success("Link removed");
                 } catch (err) {
-                  toast.error("Unable to remove link.", { description: err instanceof Error ? err.message : undefined });
+                  toast.error("Unable to remove link.", { description: friendlyError(err) });
                 }
               }}
             >
@@ -169,7 +170,7 @@ function LinkChildDialog({ guardianId }: { guardianId: string }) {
                   toast.success("Student linked", { description: `${s.firstName} ${s.lastName} is now linked to this guardian.` });
                   setOpen(false);
                 } catch (err) {
-                  toast.error("Unable to link student.", { description: err instanceof Error ? err.message : undefined });
+                  toast.error("Unable to link student.", { description: friendlyError(err) });
                 }
               }}
             >

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -147,7 +148,7 @@ export default function Allocations() {
                   await end({ allocationId: endId as never });
                   toast.success("Allocation ended");
                 } catch (err) {
-                  toast.error("Unable to end allocation.", { description: err instanceof Error ? err.message : undefined });
+                  toast.error("Unable to end allocation.", { description: friendlyError(err) });
                 }
               }}
             >
@@ -236,7 +237,7 @@ function AssignDialog({
                 toast.success("Teacher assigned");
                 onOpenChange(false);
               } catch (err) {
-                toast.error("Unable to assign teacher.", { description: err instanceof Error ? err.message : undefined });
+                toast.error("Unable to assign teacher.", { description: friendlyError(err) });
               } finally {
                 setSaving(false);
               }

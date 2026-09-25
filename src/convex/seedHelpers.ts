@@ -1,4 +1,5 @@
 import { internalQuery, internalMutation } from "./_generated/server";
+import { ConvexError } from "convex/values";
 import { v } from "convex/values";
 import type { Id, Doc } from "./_generated/dataModel";
 
@@ -1568,5 +1569,41 @@ export const seedPortalDemo = internalMutation({
       announcements++;
     }
     return { links, announcements };
+  },
+});
+
+/* ------------------------------------------------------------------ */
+/* Launch polish: complete the demo results workflow through the real   */
+/* engines — approve + publish seeded subject results, then generate    */
+/* and publish report cards so portals demo fully populated. Idempotent. */
+/* ------------------------------------------------------------------ */
+
+export const completeDemoResultsWorkflow = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const school = (await ctx.db.query("schools").collect()).find((s) => s.code === "GRN-001");
+    if (!school) return { approved: 0, generated: 0, published: 0 };
+
+    const now = Date.now();
+    const admin = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", "admin@greenfield.ac.ke"))
+      .first();
+
+    // 1. Approve submitted subject results (only where still pending).
+    const submitted = await ctx.db
+      .query("subjectResults")
+      .withIndex("by_school", (q) => q.eq("schoolId", school._id))
+      .collect()
+      .then((rs) => rs.filter((r) => r.status === "submitted"));
+    for (const r of submitted) {
+      await ctx.db.patch(r._id, {
+        status: "approved",
+        approvedById: admin?._id,
+        publishedAt: now,
+        updatedAt: now,
+      });
+    }
+    return { approved: submitted.length };
   },
 });

@@ -1,6 +1,6 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
-import { mutation, query, type MutationCtx } from "./_generated/server";
+import { internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { requirePermission, getSchoolRecord } from "./session";
 import { recordAudit } from "./audit";
@@ -249,6 +249,134 @@ export const generate = mutation({
       metadata: { termId, classSectionId },
     });
     return { generated, skipped };
+  },
+});
+
+/**
+ * Seed-only: generate report cards for a class without a user session.
+ * Reuses the same snapshot logic as the public `generate` mutation so demo
+ * data flows through the real engine. Never exposed through the router.
+ */
+export const generateInternalSeed = internalMutation({
+  args: { termId: v.id("terms"), classSectionId: v.id("classSections") },
+  handler: async (ctx, { termId, classSectionId }) => {
+    const term = await ctx.db.get(termId);
+    if (!term) return { generated: 0, skipped: 0 };
+    const schoolId = term.schoolId;
+    const settings = await ctx.db
+      .query("schoolSettings")
+      .withIndex("by_school", (q) => q.eq("schoolId", schoolId))
+      .first();
+    const rankingEnabled = settings?.rankingEnabled ?? false;
+
+    const enrolls = await ctx.db
+      .query("enrollments")
+      .withIndex("by_class_section", (q) => q.eq("classSectionId", classSectionId))
+      .collect();
+    const active = enrolls.filter((e) => e.status === "active");
+    if (active.length === 0) return { generated: 0, skipped: 0 };
+
+    const ranks = rankingEnabled ? await classRanks(ctx, termId, classSectionId) : [];
+    const rankByStudent = new Map(ranks.map((r) => [r.studentId, r]));
+
+    let generated = 0;
+    let skipped = 0;
+    for (const e of active) {
+      const existing = await ctx.db
+        .query("reportCards")
+        .withIndex("by_term_student", (q) => q.eq("termId", termId).eq("studentId", e.studentId))
+        .collect();
+      const prev = existing.find((r) => r.classSectionId === classSectionId);
+      if (prev && prev.status === "published") {
+        skipped++;
+        continue;
+      }
+      let snapshot;
+      try {
+        snapshot = await buildSnapshot(ctx, schoolId, termId, e.studentId, e._id, classSectionId, rankingEnabled);
+      } catch {
+        skipped++;
+        continue;
+      }
+      const rank = rankByStudent.get(e.studentId);
+      if (prev) {
+        await ctx.db.patch(prev._id, {
+          status: "generated",
+          attendance: snapshot.attendance,
+          overallAverage: snapshot.overallAverage,
+          overallGrade: snapshot.overallGrade,
+          subjects: snapshot.subjects,
+          rank: rankingEnabled ? (rank?.rank ?? undefined) : undefined,
+          classSize: rankingEnabled ? (rank?.classSize ?? undefined) : undefined,
+          snapshotVersion: prev.snapshotVersion + 1,
+          updatedAt: Date.now(),
+        });
+      } else {
+        await ctx.db.insert("reportCards", {
+          schoolId,
+          academicYearId: snapshot.academicYearId,
+          termId,
+          studentId: e.studentId,
+          enrollmentId: snapshot.enrollmentId,
+          classSectionId: snapshot.classSectionId,
+          status: "generated",
+          attendance: snapshot.attendance,
+          overallAverage: snapshot.overallAverage,
+          overallGrade: snapshot.overallGrade,
+          subjects: snapshot.subjects,
+          rank: rankingEnabled ? (rank?.rank ?? undefined) : undefined,
+          classSize: rankingEnabled ? (rank?.classSize ?? undefined) : undefined,
+          snapshotVersion: 1,
+        });
+      }
+      generated++;
+    }
+    return { generated, skipped };
+  },
+});
+
+/**
+ * Seed-only orchestrator: for every (term, class) that has approved subject
+ * results in the demo school, generate then publish report cards. Idempotent
+ * — already-published cards are skipped by the underlying functions.
+ */
+export const generateInternalSeedForSeed = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const approved = await ctx.db
+      .query("subjectResults")
+      .filter((q) => q.eq(q.field("status"), "approved"))
+      .collect();
+    const pairs = new Map<string, { termId: Id<"terms">; classSectionId: Id<"classSections"> }>();
+    for (const r of approved) {
+      pairs.set(`${r.termId}:${r.classSectionId}`, { termId: r.termId, classSectionId: r.classSectionId });
+    }
+    let generated = 0;
+    let published = 0;
+    for (const pair of pairs.values()) {
+      const gen = await ctx.runMutation(internal.reportCards.generateInternalSeed, pair);
+      generated += gen.generated;
+      const pub = await ctx.runMutation(internal.reportCards.publishInternalSeed, pair);
+      published += pub.published;
+    }
+    return { generated, published };
+  },
+});
+
+/** Seed-only: publish all generated report cards for a class (no session). */
+export const publishInternalSeed = internalMutation({
+  args: { termId: v.id("terms"), classSectionId: v.id("classSections") },
+  handler: async (ctx, { termId, classSectionId }) => {
+    const cards = await ctx.db
+      .query("reportCards")
+      .withIndex("by_term_class", (q) => q.eq("termId", termId).eq("classSectionId", classSectionId))
+      .collect();
+    const eligible = cards.filter((c) => c.status === "generated");
+    const now = Date.now();
+    for (const c of eligible) {
+      await ctx.db.patch(c._id, { status: "published", publishedAt: now, updatedAt: now });
+    }
+    return { published: eligible.length };
   },
 });
 

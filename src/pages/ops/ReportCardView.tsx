@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { Link, useParams } from "react-router";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/lib/status";
@@ -77,7 +78,7 @@ export default function ReportCardView() {
       });
       toast.success("Comments saved");
     } catch (err) {
-      toast.error("Unable to save comments.", { description: err instanceof Error ? err.message : undefined });
+      toast.error("Unable to save comments.", { description: friendlyError(err) });
     }
   };
 

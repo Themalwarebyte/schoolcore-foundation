@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader } from "@/components/layouts/school-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -131,7 +132,7 @@ function RowActions({ row, onOpenSheet }: { row: OverviewRow; onOpenSheet: () =>
       const res = (await fn()) as { count?: number };
       toast.success(ok + (res?.count ? ` (${res.count} students)` : ""));
     } catch (err) {
-      toast.error("Action failed.", { description: err instanceof Error ? err.message : undefined });
+      toast.error("Action failed.", { description: friendlyError(err) });
     }
   };
 

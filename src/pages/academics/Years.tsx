@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -44,7 +45,7 @@ export default function Years() {
       setOpen(false);
       setForm({ name: "", startDate: "", endDate: "", isCurrent: false });
     } catch (err) {
-      toast.error("Unable to create the academic year.", { description: err instanceof Error ? err.message : undefined });
+      toast.error("Unable to create the academic year.", { description: friendlyError(err) });
     } finally {
       setSaving(false);
     }
@@ -175,7 +176,7 @@ export default function Years() {
                   await archive({ yearId: archiveId as never });
                   toast.success("Year archived");
                 } catch (err) {
-                  toast.error("Unable to archive.", { description: err instanceof Error ? err.message : undefined });
+                  toast.error("Unable to archive.", { description: friendlyError(err) });
                 }
               }}
             >
