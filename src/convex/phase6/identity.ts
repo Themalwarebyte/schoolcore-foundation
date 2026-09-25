@@ -115,6 +115,20 @@ export const studentIdCard = query({
       .withIndex("by_subject", (q) => q.eq("subjectId", studentId))
       .collect()
       .then((ts) => ts.find((t) => t.active) ?? null);
+    // Phase 7: the card doubles as a meal + library card. Meal eligibility is
+    // resolved server-side (active plan only) — nothing sensitive in the QR.
+    const today = new Date().toISOString().slice(0, 10);
+    const mealEnrollment = await ctx.db
+      .query("mealEnrollments")
+      .withIndex("by_student", (q) => q.eq("studentId", studentId))
+      .collect()
+      .then((rows) =>
+        rows.find(
+          (r) => r.schoolId === schoolId && r.status === "active" &&
+            r.startDate <= today && (!r.endDate || r.endDate >= today),
+        ),
+      );
+    const mealPlan = mealEnrollment ? await ctx.db.get(mealEnrollment.planId) : null;
     return {
       school: { name: school?.name ?? "", logoFileId: undefined, county: school?.county ?? null },
       student: {
@@ -124,6 +138,9 @@ export const studentIdCard = query({
         classLabel: section ? `${grade?.shortName ?? grade?.name ?? ""} ${section.streamName}`.trim() : "—",
       },
       qrToken: qr?.token ?? null,
+      // Phase 7 dual/triple use of the electronic ID:
+      mealCard: mealPlan ? { planName: mealPlan.name, planType: mealPlan.planType } : null,
+      libraryCard: { enabled: true },
     };
   },
 });

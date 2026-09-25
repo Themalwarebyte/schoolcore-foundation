@@ -1,6 +1,7 @@
 import { authTables } from "@convex-dev/auth/server";
 import { defineSchema, defineTable } from "convex/server";
 import { Infer, v } from "convex/values";
+import { phase7Tables } from "./schemaPhase7";
 
 /* ------------------------------------------------------------------ */
 /* Roles & Permissions                                                 */
@@ -559,6 +560,7 @@ export const ACTIVATION_TOKEN_STATUSES = ["pending", "used", "expired", "revoked
 const schema = defineSchema(
   {
     ...authTables,
+    ...phase7Tables,
 
     users: defineTable({
       name: v.optional(v.string()),
