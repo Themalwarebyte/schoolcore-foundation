@@ -146,7 +146,7 @@ export default function Voteheads() {
                   });
                   toast.success("Votehead saved");
                   setOpen(false);
-                } catch (e) { toast.error(String(e)); }
+                } catch (e) { toast.error(friendlyError(e)); }
               }}
             >Save</Button>
           </DialogFooter>
@@ -154,4 +154,15 @@ export default function Voteheads() {
       </Dialog>
     </>
   );
+}
+
+/** Convert backend failures into user-friendly toast text. */
+function friendlyError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err ?? "");
+  const m = raw.match(/Uncaught ConvexError: (.+?)(?:\n|$)/);
+  const core = (m ? m[1] : raw)
+    .replace(/^\[Request ID: [^\]]+\]\s*/, "")
+    .replace(/\s+at .*/g, "")
+    .trim();
+  return core.length > 0 ? core.slice(0, 180) : "Something went wrong. Please try again.";
 }

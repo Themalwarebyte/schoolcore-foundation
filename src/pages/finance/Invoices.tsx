@@ -178,7 +178,14 @@ export default function Invoices() {
               </TableRow>
             ))}
             {invoices && invoices.length === 0 && (
-              <TableRow><TableCell colSpan={7} className="text-center text-sm text-muted-foreground">No invoices match the filters.</TableCell></TableRow>
+              <TableRow>
+                <TableCell colSpan={7} className="h-32 text-center">
+                  <p className="text-sm font-medium">No invoices yet</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Create your first invoice, or run a billing cycle under Fees &amp; Billing.
+                  </p>
+                </TableCell>
+              </TableRow>
             )}
           </TableBody>
         </Table>

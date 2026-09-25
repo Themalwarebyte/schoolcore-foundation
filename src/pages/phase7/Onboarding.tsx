@@ -77,8 +77,8 @@ export default function Onboarding() {
   return (
     <>
       <PageHeader
-        title="Onboarding"
-        description="Guided school setup. Each step provisions real configuration — no orphan users: every invite creates User + School Membership + Role on acceptance."
+        title="School Setup"
+        description="Step-by-step setup for your school. Each step saves real configuration, and invited staff set their own passwords on acceptance."
         actions={status && <Badge variant={record?.activated ? "default" : "secondary"}>{record?.activated ? "Active" : "Onboarding"}</Badge>}
       />
 
@@ -150,7 +150,7 @@ export default function Onboarding() {
                   currency: currency || undefined,
                 });
                 toast.success("Profile saved — step 1 complete"); setProfileOpen(false);
-              } catch (e) { toast.error(String(e)); }
+              } catch (e) { toast.error(friendlyError(e)); }
             }}>Save profile</Button>
           </DialogFooter>
         </DialogContent>
@@ -184,7 +184,7 @@ export default function Onboarding() {
                   subjectNames: subjectNames.split(",").map((s) => s.trim()).filter(Boolean),
                 });
                 toast.success("Academic setup complete — step 2 done"); setAcademicsOpen(false);
-              } catch (e) { toast.error(String(e)); }
+              } catch (e) { toast.error(friendlyError(e)); }
             }}>Configure academics</Button>
           </DialogFooter>
         </DialogContent>
@@ -223,7 +223,7 @@ export default function Onboarding() {
                   const res = await inviteInitialUsers({ users });
                   toast.success(`${res.invited} invitation(s) sent — step 3 done`);
                   setUsersOpen(false);
-                } catch (e) { toast.error(String(e)); }
+                } catch (e) { toast.error(friendlyError(e)); }
               }}
             >Send invitations</Button>
           </DialogFooter>
@@ -249,7 +249,7 @@ export default function Onboarding() {
                 try {
                   await activateSchool({ confirmName });
                   toast.success("School is now active"); setActivateOpen(false); setConfirmName("");
-                } catch (err) { toast.error(String(err)); }
+                } catch (err) { toast.error(friendlyError(err)); }
               }}
             >Activate</AlertDialogAction>
           </AlertDialogFooter>
@@ -257,4 +257,15 @@ export default function Onboarding() {
       </AlertDialog>
     </>
   );
+}
+
+/** Convert backend failures into user-friendly toast text. */
+function friendlyError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err ?? "");
+  const m = raw.match(/Uncaught ConvexError: (.+?)(?:\n|$)/);
+  const core = (m ? m[1] : raw)
+    .replace(/^\[Request ID: [^\]]+\]\s*/, "")
+    .replace(/\s+at .*/g, "")
+    .trim();
+  return core.length > 0 ? core.slice(0, 180) : "Something went wrong. Please try again.";
 }

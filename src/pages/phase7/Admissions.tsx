@@ -119,7 +119,7 @@ export default function Admissions() {
         {a.status === "submitted" && (
           <Button size="sm" variant="outline" onClick={async () => {
             try { await moveToReview({ applicationId: a._id as never }); toast.success("Moved to review"); }
-            catch (e) { toast.error(String(e)); }
+            catch (e) { toast.error(friendlyError(e)); }
           }}>Review</Button>
         )}
         {["under_review", "assessment"].includes(a.status) && (
@@ -267,7 +267,7 @@ export default function Admissions() {
                   } as never);
                   toast.success("Application submitted");
                   setCreateOpen(false); resetForm();
-                } catch (e) { toast.error(String(e)); }
+                } catch (e) { toast.error(friendlyError(e)); }
               }}
             >Submit application</Button>
           </DialogFooter>
@@ -295,7 +295,7 @@ export default function Admissions() {
                   notes: assessmentNotes || "Assessment recorded",
                 });
                 toast.success("Assessment recorded"); setAssessmentId(null);
-              } catch (e) { toast.error(String(e)); }
+              } catch (e) { toast.error(friendlyError(e)); }
             }}>Save</Button>
           </DialogFooter>
         </DialogContent>
@@ -325,7 +325,7 @@ export default function Admissions() {
                     notes: decisionNotes || undefined,
                   });
                   toast.success("Decision recorded"); setDecideId(null); setDecisionNotes("");
-                } catch (e) { toast.error(String(e)); }
+                } catch (e) { toast.error(friendlyError(e)); }
               }}
             >Confirm</Button>
           </DialogFooter>
@@ -390,7 +390,7 @@ export default function Admissions() {
                   });
                   toast.success(res.invoiceId ? "Enrolled with admission invoice" : "Enrolled");
                   setConvertId(null);
-                } catch (e) { toast.error(String(e)); }
+                } catch (e) { toast.error(friendlyError(e)); }
               }}
             >Convert & enroll</Button>
           </DialogFooter>
@@ -427,4 +427,15 @@ export default function Admissions() {
       </Dialog>
     </>
   );
+}
+
+/** Convert backend failures into user-friendly toast text. */
+function friendlyError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err ?? "");
+  const m = raw.match(/Uncaught ConvexError: (.+?)(?:\n|$)/);
+  const core = (m ? m[1] : raw)
+    .replace(/^\[Request ID: [^\]]+\]\s*/, "")
+    .replace(/\s+at .*/g, "")
+    .trim();
+  return core.length > 0 ? core.slice(0, 180) : "Something went wrong. Please try again.";
 }

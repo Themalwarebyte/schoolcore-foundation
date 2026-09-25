@@ -69,7 +69,7 @@ export default function Reconciliation() {
             try {
               const res = await allocate({ paymentId: p._id as never });
               toast.success(`Allocated ${res.allocated} (${res.strategy}, ${res.lines} lines)`);
-            } catch (e) { toast.error(String(e)); }
+            } catch (e) { toast.error(friendlyError(e)); }
           }}>
             <Wand2 className="size-3.5" /> Auto
           </Button>
@@ -79,7 +79,7 @@ export default function Reconciliation() {
             try {
               await clearAllocations({ paymentId: p._id as never });
               toast.success("Allocations cleared for re-allocation");
-            } catch (e) { toast.error(String(e)); }
+            } catch (e) { toast.error(friendlyError(e)); }
           }}>
             <Eraser className="size-3.5" />
           </Button>
@@ -101,7 +101,7 @@ export default function Reconciliation() {
             value={settings?.strategy ?? "votehead_priority"}
             onValueChange={async (v) => {
               try { await setStrategy({ strategy: v }); toast.success(`Strategy set to ${v.replace(/_/g, " ")}`); }
-              catch (e) { toast.error(String(e)); }
+              catch (e) { toast.error(friendlyError(e)); }
             }}
           >
             <SelectTrigger className="w-56"><SelectValue /></SelectTrigger>
@@ -212,4 +212,15 @@ export default function Reconciliation() {
       </Dialog>
     </>
   );
+}
+
+/** Convert backend failures into user-friendly toast text. */
+function friendlyError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err ?? "");
+  const m = raw.match(/Uncaught ConvexError: (.+?)(?:\n|$)/);
+  const core = (m ? m[1] : raw)
+    .replace(/^\[Request ID: [^\]]+\]\s*/, "")
+    .replace(/\s+at .*/g, "")
+    .trim();
+  return core.length > 0 ? core.slice(0, 180) : "Something went wrong. Please try again.";
 }

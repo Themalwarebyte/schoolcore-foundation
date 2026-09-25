@@ -190,7 +190,14 @@ export default function Payments() {
               </TableRow>
             ))}
             {payments && payments.length === 0 && (
-              <TableRow><TableCell colSpan={8} className="text-center text-sm text-muted-foreground">No payments recorded yet.</TableCell></TableRow>
+              <TableRow>
+                <TableCell colSpan={8} className="h-32 text-center">
+                  <p className="text-sm font-medium">No payments recorded yet</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Record a payment against an invoice to see it (and its receipt) here.
+                  </p>
+                </TableCell>
+              </TableRow>
             )}
           </TableBody>
         </Table>
