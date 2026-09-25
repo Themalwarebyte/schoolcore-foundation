@@ -155,7 +155,14 @@ export const getUserAccessInfo = internalQuery({
 const BOOTSTRAP_EMAIL = (process.env.PLATFORM_ADMIN_EMAIL ?? "admin@schoolcore.dev")
   .trim()
   .toLowerCase();
-const BOOTSTRAP_PASSWORD = process.env.PLATFORM_ADMIN_PASSWORD ?? "ChangeMe!2026";
+/**
+ * SECURITY: the platform super admin password must come from the environment.
+ * A built-in default here would let any new deployment come up with a
+ * publicly-known super-admin credential, so bootstrap REFUSES to provision
+ * when it is unset (existing deployments are unaffected — they already have
+ * their account and never re-enter this branch).
+ */
+const BOOTSTRAP_PASSWORD = process.env.PLATFORM_ADMIN_PASSWORD ?? null;
 const BOOTSTRAP_NAME = process.env.PLATFORM_ADMIN_NAME ?? "Platform Administrator";
 
 export const ensureBootstrapAdmin = internalAction({
@@ -172,12 +179,20 @@ export const ensureBootstrapAdmin = internalAction({
     if (account) {
       userId = account.user._id as Id<"users">;
     } else {
+      // SECURITY: never mint the platform super admin with a built-in default
+      // password — provisioning must be an explicit, secret-bearing act.
+      const password = BOOTSTRAP_PASSWORD;
+      if (!password) {
+        throw new ConvexError(
+          "PLATFORM_ADMIN_PASSWORD is not set. Refusing to create the platform admin with a default password — set the environment variable and rerun.",
+        );
+      }
       // Let createAccount create the user row it links to, then re-resolve:
       // pre-creating a user row separately risks the membership landing on a
       // different duplicate user record than the one sign-in resolves to.
       await createAccount(ctx, {
         provider: "password",
-        account: { id: BOOTSTRAP_EMAIL, secret: BOOTSTRAP_PASSWORD },
+        account: { id: BOOTSTRAP_EMAIL, secret: password },
         profile: { email: BOOTSTRAP_EMAIL, name: BOOTSTRAP_NAME },
       });
       const created = await retrieveAccount(ctx, {
