@@ -35,6 +35,7 @@ crons.daily(
   "prune GPS pings older than the retention window",
   { hourUTC: 2, minuteUTC: 0 },
   internal.phase6.identity.pruneOldPingsInternal,
+  {},
 );
 
 export default crons;
