@@ -186,12 +186,32 @@ export const redeemToken = action({
         profile: { email: target.email, name: target.name ?? undefined },
       });
     }
-    // Consume the token + accept invitations. Re-checked here, so a race can
-    // never redeem one code twice.
-    await ctx.runMutation(internal.phase7.inviteTokens.completeRedemptionInternal, {
-      tokenId: target.tokenId as never,
-      userId: target.userId as never,
+    // The invitation's membership/links live on the pre-created `users` row,
+    // but sign-in resolves to the auth account's own user row. Adopt the
+    // account row so the invitee signs in WITH their school membership (never
+    // the "account not linked to school" state).
+    const afterAccount = await retrieveAccount(ctx, {
+      provider: "password",
+      account: { id: target.email },
     });
+    const accountUserId = afterAccount?.user?._id as Id<"users"> | undefined;
+    if (accountUserId && accountUserId !== target.userId) {
+      await ctx.runMutation(internal.phase7.inviteTokens.adoptAccountUserInternal, {
+        orphanUserId: target.userId as never,
+        accountUserId: accountUserId as never,
+      });
+      await ctx.runMutation(internal.phase7.inviteTokens.completeRedemptionInternal, {
+        tokenId: target.tokenId as never,
+        userId: accountUserId as never,
+      });
+    } else {
+      // Consume the token + accept invitations. Re-checked here, so a race
+      // can never redeem one code twice.
+      await ctx.runMutation(internal.phase7.inviteTokens.completeRedemptionInternal, {
+        tokenId: target.tokenId as never,
+        userId: target.userId as never,
+      });
+    }
     return { ok: true, kind: "redeemed" };
   },
 });

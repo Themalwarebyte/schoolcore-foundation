@@ -292,7 +292,38 @@ export const runInternal6 = action({
         body: a.body as string,
       });
     }
+    if (name === "inviteCode") {
+      return await ctx.runQuery(internal.diagnostics.inviteCodeProbe, {
+        schoolId: a.schoolId as never,
+        recipientAddress: a.recipientAddress as string,
+        event: (a.event ?? undefined) as never,
+      });
+    }
     throw new Error(`Unknown Phase 6 routine: ${name}`);
+  },
+});
+
+/**
+ * Phase 7 verification bridge: read the latest queued invite/reset email body
+ * for a recipient so the harness can complete the activation flow end-to-end
+ * (the raw one-time code is only ever delivered through the queued email).
+ * Read-only; returns the body verbatim — no secrets are logged by the harness.
+ */
+export const inviteCodeProbe = internalQuery({
+  args: { schoolId: v.id("schools"), recipientAddress: v.string(), event: v.optional(v.string()) },
+  handler: async (ctx, { schoolId, recipientAddress, event }) => {
+    const msgs = await ctx.db
+      .query("commMessages")
+      .withIndex("by_school", (q) => q.eq("schoolId", schoolId))
+      .collect();
+    const matches = msgs
+      .filter((m) => m.recipientAddress === recipientAddress && (event ? m.event === event : true))
+      .sort((a, b) => b.queuedAt - a.queuedAt);
+    return {
+      count: matches.length,
+      statuses: matches.map((m) => m.status),
+      latestBody: matches[0]?.body ?? null,
+    };
   },
 });
 

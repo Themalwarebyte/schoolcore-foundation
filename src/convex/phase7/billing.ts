@@ -22,6 +22,7 @@ import { mutation, query } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { requirePermission, getSchoolRecord } from "../session";
 import { recordAudit } from "../audit";
+import { recordPaymentInternal } from "./bankPosting";
 import { ALLOCATION_STRATEGIES, BANK_IMPORT_STATUSES } from "../schema";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -720,7 +721,6 @@ export const postBankRows = mutation({
     const session = await requirePermission(ctx, "bank_imports.manage");
     const schoolId = session.schoolId as Id<"schools">;
     if (rowIds.length === 0) throw new ConvexError("Select at least one row to post.");
-    const { recordPaymentInternal } = await import("./bankPosting");
     let posted = 0, skipped = 0;
     const errors: string[] = [];
     for (const rowId of rowIds) {

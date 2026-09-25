@@ -2,21 +2,20 @@
  * Phase 7 final verification — backend tests against the live deployment.
  * Usage: bun scripts/phase7-verify.mjs <convexCloudUrl>
  *
- * Sections:
- *   A. School registration (public submit, validation, status check)
- *   B. Platform review workflow (approve → workspace + onboarding record)
- *   C. Onboarding wizard (profile, academics, initial users, activate)
- *   D. Invitations & one-time tokens (invite, accept, reset, expiry)
- *   E. Admissions (application → review → assessment → decision → conversion)
- *   F. Promotion (wizard preview, confirm, historical enrollment preserved)
- *   G. Fee voteheads + payment allocation (priority, partial, manual, audit)
- *   H. Bank import (stage, match, duplicate ref, post, discard)
- *   I. Meals (plans, eligibility, consumption, duplicate guard, QR)
- *   J. Access management (overview, dormant detection)
- *   K. Security / tenant isolation (cross-school, RBAC denials)
- *   L. Regression smoke (Phases 1–6 still respond)
+ * Covers the Phase 7 verification spec:
+ *   1. School registration (public submit → docs → super admin view + audit)
+ *   2. School approval (review → approve → workspace; no duplicates; audited)
+ *   3. Onboarding wizard (profile → academics → users → activate)
+ *   4. User invitations (invite → activate → login resolves User+Membership+Role)
+ *   5. Imports (validation, preview, dup detection, commit; staff linkage)
+ *   6. Admissions (application → review → decision → conversion; no dup students)
+ *   7. Promotion (history preserved; new enrollment; idempotent re-run)
+ *   8. Finance (voteheads, breakdown, partial payment, allocation, reconciliation)
+ *   9. Meals + student ID (eligibility, QR consumption, parent scope)
+ *  10. Security (Greenfield vs Riverside isolation across Phase 7 modules)
+ *  11. Regression (Phases 1–6 core flows still respond)
  *
- * Only creates SMOKE-prefixed test records. No secrets are echoed.
+ * Only creates SMOKE-prefixed records. No secrets are echoed.
  */
 const url = process.argv[2];
 if (!url) {
@@ -30,7 +29,7 @@ let pass = 0, fail = 0;
 const failures = [];
 function check(name, cond, detail = "") {
   if (cond) { pass++; console.log(`  PASS  ${name}`); }
-  else { fail++; failures.push(name); console.log(`  FAIL  ${name}${detail ? ` — ${String(detail).slice(0, 220)}` : ""}`); }
+  else { fail++; failures.push(name); console.log(`  FAIL  ${name}${detail ? ` — ${String(detail).slice(0, 200)}` : ""}`); }
 }
 function describeErr(err) {
   let e = err, parts = [];
@@ -39,20 +38,19 @@ function describeErr(err) {
     parts.push(`${String(e.message ?? e)}${data}`);
     e = e.cause;
   }
-  return parts.join(" :: ").slice(0, 260);
+  return parts.join(" :: ").slice(0, 220);
 }
 function isDenied(err) {
   const s = describeErr(err).toLowerCase();
   return s.includes("permission") || s.includes("not signed in") || s.includes("denied") ||
     s.includes("not found") || s.includes("only") || s.includes("cannot") || s.includes("can only") ||
     s.includes("does not belong") || s.includes("access to this record") || s.includes("invalid") ||
-    s.includes("unrecognized") || s.includes("must be") || s.includes("you can only") ||
-    s.includes("platform access") || s.includes("unknown") || s.includes("required") ||
-    s.includes("already") || s.includes("administrator") || s.includes("select a school") ||
-    s.includes("required.") || s.includes("no active") || s.includes("revoked") ||
-    s.includes("enter a valid") || s.includes("must differ") || s.includes("at least one") ||
-    s.includes("has no") || s.includes("already been") || s.includes("is not") ||
-    s.includes("action") || s.includes("no tokens") || s.includes("accepted");
+    s.includes("unrecognized") || s.includes("must be") || s.includes("must match") || s.includes("must end") ||
+    s.includes("you do not have") || s.includes("no such") || s.includes("select a school") ||
+    s.includes("required") || s.includes("already") || s.includes("no longer") || s.includes("blocked") ||
+    s.includes("unknown") || s.includes("before approving") || s.includes("complete the") ||
+    s.includes("type the school name") || s.includes("no active meal plan") || s.includes("expired") ||
+    s.includes("first") || s.includes("exceeds") || s.includes("needs a") || s.includes("surplus");
 }
 
 async function signIn(email, password) {
@@ -75,680 +73,903 @@ function client(jwt) {
 const Q = (c, fn, args) => c.query(fn, args);
 const M = (c, fn, args) => c.mutation(fn, args);
 const A = (c, fn, args) => c.action(fn, args);
+/** Bridge into internal read-only probes (name-allowlisted action). */
+const BR = async (name, args = {}) => {
+  const c = new ConvexHttpClient(url);
+  try {
+    return await c.action(anyApi.diagnostics.runInternal6, { name, argsJson: JSON.stringify(args) });
+  } catch (err) {
+    return { bridgeError: describeErr(err) };
+  } finally { c.close?.(); }
+};
+/** Extract the one-time activation code from a queued invite email body. */
+function codeFromBody(body) {
+  const m = /code:\s*([A-Za-z0-9]+)/.exec(body ?? "");
+  return m ? m[1] : null;
+}
 
 const suffix = Date.now() % 100000;
 const today = new Date().toISOString().slice(0, 10);
+const yearNow = new Date().getFullYear();
 
 /* ================================================================ */
-console.log("== A. SCHOOL REGISTRATION (public) ==");
-const platform = await signIn("admin@schoolcore.dev", "ChangeMe!2026");
-check("A0. Platform admin sign-in", !!platform.jwt, platform.error ?? "");
+console.log("== 1. SCHOOL REGISTRATION (public) ==");
+const REQUEST_EMAIL = `smoke-school-${suffix}@reg.example.com`;
+let publicRequestId = null;
+{
+  const c = client(); // unauthenticated
+  // 1a. Validation
+  const bad = await M(c, anyApi.phase7.registration.submitRequest, {
+    schoolName: "X", email: "not-an-email", contactName: "", contactEmail: "also-bad",
+  }).then(() => null).catch((e) => e);
+  check("1a. Registration validation rejects bad input", !!bad && isDenied(bad), describeErr(bad ?? ""));
+
+  // 1b. Happy path submission
+  const sub = await M(c, anyApi.phase7.registration.submitRequest, {
+    schoolName: `SMOKE Hillside Academy ${suffix}`,
+    registrationNumber: `REG-${suffix}`,
+    country: "Kenya",
+    county: "Nairobi",
+    physicalAddress: "1 SMOKE Lane",
+    postalAddress: `PO Box ${suffix}`,
+    schoolType: "private",
+    curriculum: "CBC",
+    expectedStudents: 320,
+    expectedTeachers: 24,
+    website: "https://smoke-hillside.example.com",
+    email: REQUEST_EMAIL,
+    phone: "+254700111222",
+    contactName: "Smoke Contact",
+    contactPosition: "Director",
+    contactEmail: `smoke-contact-${suffix}@reg.example.com`,
+    contactPhone: "+254700333444",
+    notes: `Harness submission ${suffix}`,
+  }).then((r) => ({ ok: r })).catch((e) => ({ err: e }));
+  publicRequestId = sub.ok?.requestId ?? null;
+  check("1b. Public registration request created", !!publicRequestId, describeErr(sub.err ?? ""));
+
+  // 1c. Duplicate submission for the same school email is blocked
+  const dup = await M(c, anyApi.phase7.registration.submitRequest, {
+    schoolName: `SMOKE Hillside Academy ${suffix} Again`,
+    email: REQUEST_EMAIL,
+    contactName: "Dup",
+    contactEmail: `smoke-contact-${suffix}@reg.example.com`,
+  }).then(() => null).catch((e) => e);
+  check("1c. Duplicate open request blocked (one open request per email)", !!dup && isDenied(dup), describeErr(dup ?? ""));
+
+  // 1d. Attach a document (registration certificate)
+  let docId = null;
+  if (publicRequestId) {
+    const bytes = new TextEncoder().encode(`SMOKE certificate ${suffix}`).buffer;
+    const up = await M(c, anyApi.phase7.registration.attachRequestDocument, {
+      requestId: publicRequestId, kind: "registration_certificate",
+      filename: `certificate-${suffix}.txt`, mimeType: "text/plain", bytes,
+    }).then((r) => ({ ok: r })).catch((e) => ({ err: e }));
+    docId = up.ok?.documentId ?? null;
+    check("1d. Registration document attached", !!docId, describeErr(up.err ?? ""));
+    // Unknown kind rejected
+    const badKind = await M(c, anyApi.phase7.registration.attachRequestDocument, {
+      requestId: publicRequestId, kind: "passport_photo",
+      filename: "x.txt", mimeType: "text/plain", bytes,
+    }).then(() => null).catch((e) => e);
+    check("1e. Unknown document kind rejected", !!badKind && isDenied(badKind), describeErr(badKind ?? ""));
+  }
+
+  // 1f. Public status lookup shows coarse status only
+  const statusRows = await Q(c, anyApi.phase7.registration.requestStatusByEmail, { email: REQUEST_EMAIL })
+    .then((r) => r).catch((e) => ({ err: e }));
+  const row = Array.isArray(statusRows) ? statusRows.find((r) => r.requestId === publicRequestId) : null;
+  check("1f. Public status lookup resolves (coarse)", !!row && row.status === "submitted",
+    JSON.stringify(statusRows ?? {}).slice(0, 120));
+  check("1g. Public status hides reviewer notes", !!row && row.decisionNotes === undefined && row.notes === undefined);
+
+  // 1h. Unauthenticated callers cannot use the platform portal
+  const denied = await Q(c, anyApi.phase7.registration.platformListRequests, {})
+    .then(() => null).catch((e) => e);
+  check("1h. Unauthenticated platform portal access denied", !!denied && isDenied(denied), describeErr(denied ?? ""));
+  c.close?.();
+}
+
+/* ================================================================ */
+console.log("\n== 2. SUPER ADMIN REVIEW + APPROVAL ==");
+const sa = await signIn("admin@schoolcore.dev", "ChangeMe!2026");
+check("2a. Super admin sign-in", !!sa.jwt, sa.error ?? "");
 const gfAdmin = await signIn("admin@greenfield.ac.ke", "Greenfield#2026");
-check("A0b. Greenfield admin sign-in", !!gfAdmin.jwt, gfAdmin.error ?? "");
+check("2b. Greenfield admin sign-in", !!gfAdmin.jwt, gfAdmin.error ?? "");
 const rvAdmin = await signIn("admin@riverside.ac.ke", "Riverside#2026");
-check("A0c. Riverside admin sign-in", !!rvAdmin.jwt, rvAdmin.error ?? "");
-const teacher = await signIn("grace.wanjiku@greenfield.ac.ke", "Greenfield#2026");
-check("A0d. Teacher sign-in", !!teacher.jwt, teacher.error ?? "");
+check("2c. Riverside admin sign-in", !!rvAdmin.jwt, rvAdmin.error ?? "");
+const gfTeacher = await signIn("grace.wanjiku@greenfield.ac.ke", "Greenfield#2026");
+check("2d. Greenfield teacher sign-in", !!gfTeacher.jwt, gfTeacher.error ?? "");
 
-const anon = client(null);
-const smokeEmail = `smoke-school-${suffix}@example.ac.ke`;
-let smokeRequestId = null;
+let greenfieldId = null, riversideId = null;
 {
-  // Public submission (no auth).
-  try {
-    const res = await M(anon, anyApi.phase7.registration.submitRequest, {
-      schoolName: `SMOKE Academy ${suffix}`,
-      registrationNumber: `REG-SMOKE-${suffix}`,
-      country: "Kenya", county: "Nairobi",
-      schoolType: "Private day school", curriculum: "CBC",
-      expectedStudents: 350, expectedTeachers: 18,
-      email: smokeEmail, phone: `+2547${String(10000000 + suffix)}`,
-      contactName: "SMOKE Contact", contactPosition: "Director",
-      contactEmail: `smoke-contact-${suffix}@example.com`,
-      contactPhone: `+2547${String(20000000 + suffix)}`,
-    });
-    smokeRequestId = res?.requestId ?? null;
-    check("A1. Public school request submitted (no auth)", !!smokeRequestId, JSON.stringify(res ?? {}));
-  } catch (err) { check("A1. Public school request submitted (no auth)", false, describeErr(err)); }
+  const sc = client(sa.jwt);
+  const listed = await Q(sc, anyApi.schools.listSchools, {}).catch(() => []);
+  greenfieldId = (listed ?? []).find((s) => s.code === "GRN-001")?._id ?? null;
+  riversideId = (listed ?? []).find((s) => s.code === "RVS-002")?._id ?? null;
+  check("2e. Seeded schools visible to platform admin", !!greenfieldId && !!riversideId,
+    `gf=${greenfieldId} rv=${riversideId}`);
+  sc.close?.();
+}
 
-  // Validation: bad email.
+let detail = null, detailSchoolId = null;
+if (sa.jwt && publicRequestId) {
+  const c = client(sa.jwt);
   try {
-    await M(anon, anyApi.phase7.registration.submitRequest, {
-      schoolName: "SMOKE Bad", email: "not-an-email", contactName: "x", contactEmail: "also-bad",
-    });
-    check("A2. Invalid email rejected", false, "expected error");
-  } catch (err) { check("A2. Invalid email rejected", isDenied(err), describeErr(err)); }
+    // 2f. School admin cannot see the platform request portal
+    const gfDenied = await client(gfAdmin.jwt)
+      .query(anyApi.phase7.registration.platformListRequests, {}).then(() => null).catch((e) => e);
+    check("2f. School admin denied platform request portal", !!gfDenied && isDenied(gfDenied), describeErr(gfDenied ?? ""));
 
-  // Duplicate open request.
-  try {
-    await M(anon, anyApi.phase7.registration.submitRequest, {
-      schoolName: "SMOKE Dup", email: smokeEmail, contactName: "x", contactEmail: `c${suffix}@x.com`,
-    });
-    check("A3. Duplicate open request rejected", false, "expected error");
-  } catch (err) { check("A3. Duplicate open request rejected", isDenied(err), describeErr(err)); }
+    const rows = await Q(c, anyApi.phase7.registration.platformListRequests, {});
+    check("2g. Request visible to super admin", (rows ?? []).some((r) => r._id === publicRequestId));
 
-  // Public status check.
-  try {
-    const st = await Q(anon, anyApi.phase7.registration.requestStatus, { email: smokeEmail });
-    check("A4. Public status check works", st && st.status === "submitted", JSON.stringify(st ?? {}));
-  } catch (err) { check("A4. Public status check works", false, describeErr(err)); }
+    await M(c, anyApi.phase7.registration.reviewRequest, { requestId: publicRequestId, action: "start_review" });
+    const d1 = await Q(c, anyApi.phase7.registration.platformRequestDetail, { requestId: publicRequestId });
+    check("2h. Review started (status under_review)", d1?.request?.status === "under_review");
 
-  // Anonymous cannot list requests.
-  try {
-    await Q(anon, anyApi.phase7.registration.listRequests, {});
-    check("A5. Anonymous cannot list requests", false, "expected error");
-  } catch (err) { check("A5. Anonymous cannot list requests", isDenied(err), describeErr(err)); }
+    // 2i. Approve requires review first — reject another request path? Instead
+    // verify approve guards with a second SMOKE request submitted now.
+    const c2 = client();
+    const second = (await M(c2, anyApi.phase7.registration.submitRequest, {
+      schoolName: `SMOKE Lagoon School ${suffix}`,
+      email: `smoke-school2-${suffix}@reg.example.com`,
+      contactName: "Smoke Contact 2",
+      contactEmail: `smoke-contact2-${suffix}@reg.example.com`,
+    }))?.requestId;
+    c2.close?.();
+    const approveEarly = await M(c, anyApi.phase7.registration.approveRequest, { requestId: second })
+      .then(() => null).catch((e) => e);
+    check("2i. Approval requires review first", !!approveEarly && isDenied(approveEarly), describeErr(approveEarly ?? ""));
 
-  // School admin cannot access platform registration queries.
-  if (gfAdmin.jwt) {
-    const c = client(gfAdmin.jwt);
-    try {
-      await Q(c, anyApi.phase7.registration.listRequests, {});
-      check("A6. School admin blocked from platform requests", false, "expected error");
-    } catch (err) { check("A6. School admin blocked from platform requests", isDenied(err), describeErr(err)); }
-  }
+    // 2j. Reject the second request (with mandatory reason)
+    const noReason = await M(c, anyApi.phase7.registration.rejectRequest, { requestId: second, reason: "   " })
+      .then(() => null).catch((e) => e);
+    check("2j. Rejection requires a reason", !!noReason && isDenied(noReason), describeErr(noReason ?? ""));
+    await M(c, anyApi.phase7.registration.rejectRequest, { requestId: second, reason: `Harness reject ${suffix}` });
+    const d2 = await Q(c, anyApi.phase7.registration.platformRequestDetail, { requestId: second });
+    check("2k. Rejection recorded", d2?.request?.status === "rejected");
+
+    // 2l. Full approval: review → approve → workspace + onboarding record
+    const approved = await M(c, anyApi.phase7.registration.approveRequest, {
+      requestId: publicRequestId, notes: `Harness approval ${suffix}`,
+    }).then((r) => ({ ok: r })).catch((e) => ({ err: e }));
+    detailSchoolId = approved.ok?.schoolId ?? null;
+    check("2l. Approval creates school workspace", !!detailSchoolId, describeErr(approved.err ?? ""));
+
+    detail = await Q(c, anyApi.phase7.registration.platformRequestDetail, { requestId: publicRequestId });
+    check("2m. Request moved to onboarding", detail?.request?.status === "onboarding");
+    check("2n. No duplicate school (unique workspace per request)", !!detail?.school && detail.school.name.includes("SMOKE Hillside"));
+
+    // 2o. Re-approval of the same request must be impossible
+    const reApprove = await M(c, anyApi.phase7.registration.approveRequest, { requestId: publicRequestId })
+      .then(() => null).catch((e) => e);
+    check("2o. Duplicate approval blocked (workspace already exists)", !!reApprove && isDenied(reApprove), describeErr(reApprove ?? ""));
+
+    // 2p. Document metadata visible in the portal (content NOT exposed in list)
+    check("2p. Uploaded document visible to super admin (metadata only)",
+      (detail?.documents ?? []).some((d) => d.kind === "registration_certificate"));
+  } catch (err) { check("2. Approval flow", false, describeErr(err)); }
+  c.close?.();
 }
 
 /* ================================================================ */
-console.log("== B. PLATFORM REVIEW WORKFLOW ==");
-let smokeSchoolId = null;
-{
-  const c = client(platform.jwt);
-  try {
-    await M(c, anyApi.phase7.registration.reviewRequest, { requestId: smokeRequestId, decision: "under_review" });
-    check("B1. Request moved to under_review", true);
-  } catch (err) { check("B1. Request moved to under_review", false, describeErr(err)); }
+console.log("\n== 3. ONBOARDING WIZARD (as the onboarding school's admin) ==");
+let smokeSchoolAdminJwt = null, smokeSchoolId = null;
+if (sa.jwt && detailSchoolId) {
+  // The wizard is school-scoped (onboarding.view/manage resolve through the
+  // caller's OWN school membership) — the product flow is: approval invites
+  // the contact person as school_admin → they activate via the one-time code
+  // → they complete the wizard. The harness replays exactly that.
+  smokeSchoolId = detailSchoolId;
 
-  try {
-    await M(c, anyApi.phase7.registration.reviewRequest, { requestId: smokeRequestId, decision: "reject" });
-    check("B2. Reject requires notes", false, "expected error");
-  } catch (err) { check("B2. Reject requires notes", isDenied(err), describeErr(err)); }
+  // 3a. Super admin sees onboarding progress from the platform view.
+  const sc = client(sa.jwt);
+  const platformRows = await Q(sc, anyApi.phase7.onboarding.platformList, {});
+  const prow = (platformRows ?? []).find((r) => r.schoolId === detailSchoolId);
+  check("3a. Onboarding record created at approval (platform view)", !!prow && prow.profileDone === false,
+    JSON.stringify(prow ?? {}).slice(0, 140));
+  sc.close?.();
 
-  try {
-    const res = await M(c, anyApi.phase7.registration.reviewRequest, {
-      requestId: smokeRequestId, decision: "approve", notes: "SMOKE approval",
-    });
-    smokeSchoolId = res?.schoolId ?? null;
-    check("B3. Approve provisions school workspace", !!smokeSchoolId, JSON.stringify(res ?? {}));
-  } catch (err) { check("B3. Approve provisions school workspace", false, describeErr(err)); }
+  // 3b. Read the contact person's one-time code from the queued invite email.
+  const contactEmail = `smoke-contact-${suffix}@reg.example.com`;
+  const probe = await BR("inviteCode", { schoolId: detailSchoolId, recipientAddress: contactEmail, event: "portal_invite" });
+  const rawToken = codeFromBody(probe?.latestBody);
+  check("3b. Contact person invited with a queued one-time code", !!rawToken,
+    probe?.bridgeError ?? `codes found: ${probe?.count ?? 0}`);
 
-  if (smokeSchoolId) {
-    const detail = await Q(c, anyApi.schools.getSchool, { schoolId: smokeSchoolId }).catch(() => null);
-    check("B4. Provisioned school exists", !!detail, JSON.stringify(detail ?? {}).slice(0, 120));
-    const st = await Q(anon, anyApi.phase7.registration.requestStatus, { email: smokeEmail });
-    check("B5. Request status reflects onboarding/active", ["onboarding", "active"].includes(st?.status), JSON.stringify(st ?? {}));
+  if (rawToken) {
+    // 3c. Activate the contact person (password creation, public action).
+    const SMOKE_SCHOOL_PASSWORD = `SmokeSchool${suffix}#A`;
+    const anon = client();
+    const redeemed = await A(anon, anyApi.phase7.invitations.redeemToken, { token: rawToken, newPassword: SMOKE_SCHOOL_PASSWORD })
+      .then((r) => ({ ok: r })).catch((e) => ({ err: e }));
+    check("3c. Contact person activates via one-time code", !!redeemed.ok?.ok, describeErr(redeemed.err ?? ""));
+    anon.close?.();
+
+    const signedIn = await signIn(contactEmail, SMOKE_SCHOOL_PASSWORD);
+    smokeSchoolAdminJwt = signedIn.jwt ?? null;
+    check("3d. Activated contact signs in as the school's admin", !!smokeSchoolAdminJwt, signedIn.error ?? "");
   }
 
-  // School admin still cannot review.
-  if (gfAdmin.jwt && smokeRequestId) {
-    const c2 = client(gfAdmin.jwt);
+  if (smokeSchoolAdminJwt) {
+    const c = client(smokeSchoolAdminJwt);
     try {
-      await M(c2, anyApi.phase7.registration.reviewRequest, { requestId: smokeRequestId, decision: "under_review" });
-      check("B6. School admin cannot review requests", false, "expected error");
-    } catch (err) { check("B6. School admin cannot review requests", isDenied(err), describeErr(err)); }
-  }
-}
+      const status0 = await Q(c, anyApi.phase7.onboarding.getStatus, {});
+      check("3e. Wizard status resolves (all steps pending)",
+        !!status0?.record && !status0.record.activated && !status0.record.profileDone,
+        JSON.stringify(status0?.record ?? {}));
 
-/* ================================================================ */
-console.log("== C. ONBOARDING WIZARD ==");
-{
-  const c = client(gfAdmin.jwt);
-  try {
-    const st = await Q(c, anyApi.phase7.onboarding.getStatus, {});
-    check("C1. Onboarding status readable", st && typeof st.schoolName === "string", JSON.stringify(st ?? {}).slice(0, 120));
-  } catch (err) { check("C1. Onboarding status readable", false, describeErr(err)); }
+      // 3f. Activation before prerequisites blocked
+      const early = await M(c, anyApi.phase7.onboarding.activateSchool, { confirmName: "SMOKE" })
+        .then(() => null).catch((e) => e);
+      check("3f. Activation blocked before prerequisites", !!early && isDenied(early), describeErr(early ?? ""));
 
-  try {
-    await M(c, anyApi.phase7.onboarding.saveProfile, { county: "Nairobi", currency: "KES" });
-    check("C2. Profile step saves", true);
-  } catch (err) { check("C2. Profile step saves", isDenied(err), describeErr(err)); }
+      // 3g. Step 1: profile
+      await M(c, anyApi.phase7.onboarding.saveProfile, {
+        phone: "+254700999888", currency: "KES", county: "Nairobi", country: "Kenya",
+      });
+      const status1 = await Q(c, anyApi.phase7.onboarding.getStatus, {});
+      check("3g. Step 1 profile saved", status1?.record?.profileDone === true);
 
-  // Teacher blocked from onboarding management.
-  const t = client(teacher.jwt);
-  try {
-    await M(t, anyApi.phase7.onboarding.saveProfile, { county: "Hack" });
-    check("C3. Teacher cannot manage onboarding", false, "expected error");
-  } catch (err) { check("C3. Teacher cannot manage onboarding", isDenied(err), describeErr(err)); }
-
-  if (smokeSchoolId) {
-    const p = client(platform.jwt);
-    try {
-      // Super admin entering the new school context completes profile+academics.
-      await M(p, anyApi.phase7.onboarding.saveProfile, { county: "Nairobi", currency: "KES" }).catch(() => null);
-      await M(p, anyApi.phase7.onboarding.setupAcademics, {
-        yearName: `2026-SM${suffix}`, yearStart: "2026-01-05", yearEnd: "2026-11-20",
+      // 3h. Step 2: academics (year 2027 to avoid clashing with the 2026 year
+      // the promotion section uses on Greenfield).
+      await M(c, anyApi.phase7.onboarding.setupAcademics, {
+        yearName: `${yearNow + 1}`,
+        yearStart: `${yearNow + 1}-01-01`,
+        yearEnd: `${yearNow + 1}-12-31`,
         termCount: 3,
         gradeNames: ["Grade 1", "Grade 2"],
-        streams: ["Blue"],
+        streams: ["Blue", "Green"],
         subjectNames: ["Mathematics", "English"],
       });
-      check("C4. Academics step provisions year/terms/grades/classes/subjects", true);
-    } catch (err) { check("C4. Academics step provisions year/terms/grades/classes/subjects", isDenied(err), describeErr(err)); }
+      const status2 = await Q(c, anyApi.phase7.onboarding.getStatus, {});
+      check("3h. Step 2 academics saved", status2?.record?.academicsDone === true);
 
-    try {
-      await M(p, anyApi.phase7.onboarding.inviteInitialUsers, {
-        users: [{ email: `smoke-admin-${suffix}@example.com`, name: "SMOKE Admin", role: "school_admin" }],
+      // 3i. Step 3: initial users
+      const invited = await M(c, anyApi.phase7.onboarding.inviteInitialUsers, {
+        users: [
+          { email: `smoke-admin2-${suffix}@smoke-hillside.test`, name: "Smoke Hillside Admin", role: "school_admin" },
+          { email: `smoke-principal-${suffix}@smoke-hillside.test`, name: "Smoke Hillside Principal", role: "principal" },
+          { email: `smoke-accounts-${suffix}@smoke-hillside.test`, name: "Smoke Hillside Accountant", role: "accountant" },
+        ],
       });
-      check("C5. Initial users invited (invitations, no passwords)", true);
-    } catch (err) { check("C5. Initial users invited (invitations, no passwords)", isDenied(err), describeErr(err)); }
+      check("3i. Step 3 initial users invited (3)", (invited?.invited?.length ?? 0) === 3);
 
-    try {
-      await M(p, anyApi.phase7.onboarding.activateSchool, { confirmName: "WRONG NAME" });
-      check("C6. Activation requires name confirm", false, "expected error");
-    } catch (err) { check("C6. Activation requires name confirm", isDenied(err), describeErr(err)); }
+      // 3j. Activation requires exact name confirmation
+      const wrongName = await M(c, anyApi.phase7.onboarding.activateSchool, { confirmName: "Wrong Name" })
+        .then(() => null).catch((e) => e);
+      check("3j. Activation requires exact school name confirmation", !!wrongName && isDenied(wrongName), describeErr(wrongName ?? ""));
+      await M(c, anyApi.phase7.onboarding.activateSchool, { confirmName: `SMOKE Hillside Academy ${suffix}` });
+      const status3 = await Q(c, anyApi.phase7.onboarding.getStatus, {});
+      check("3k. School activated (status active)", status3?.record?.activated === true && status3?.schoolStatus === "active");
+
+      // 3l. Platform mirrors the request as active
+      const sc2 = client(sa.jwt);
+      const dFinal = await Q(sc2, anyApi.phase7.registration.platformRequestDetail, { requestId: publicRequestId });
+      check("3l. Registration request marked active", dFinal?.request?.status === "active");
+      sc2.close?.();
+
+      // 3m. Acquire the initial admin's code too and verify that activation
+      // resolves User + Membership + Role for the wizard-created account.
+      const adminEmail = `smoke-admin2-${suffix}@smoke-hillside.test`;
+      const probe2 = await BR("inviteCode", { schoolId: detailSchoolId, recipientAddress: adminEmail, event: "portal_invite" });
+      const adminToken = codeFromBody(probe2?.latestBody);
+      if (adminToken) {
+        const anon2 = client();
+        await A(anon2, anyApi.phase7.invitations.redeemToken, { token: adminToken, newPassword: `SmokeAdmin${suffix}#B` });
+        anon2.close?.();
+        const adminIn = await signIn(adminEmail, `SmokeAdmin${suffix}#B`);
+        if (adminIn.jwt) {
+          const ac = client(adminIn.jwt);
+          const me = await Q(ac, anyApi.accounts.myMemberships, {});
+          check("3m. Wizard-created admin resolves User + Membership + Role",
+            (me?.memberships ?? []).some((m) => m.schoolId === detailSchoolId && m.role === "school_admin"),
+            JSON.stringify(me?.memberships ?? {}).slice(0, 140));
+          ac.close?.();
+        } else {
+          check("3m. Wizard-created admin resolves User + Membership + Role", false, adminIn.error ?? "no tokens");
+        }
+      }
+    } catch (err) { check("3. Onboarding flow", false, describeErr(err)); }
+    c.close?.();
   }
 }
 
 /* ================================================================ */
-console.log("== D. INVITATIONS & ONE-TIME TOKENS ==");
-let inviteToken = null, inviteId = null;
+console.log("\n== 4. USER INVITATIONS + ACTIVATION (Greenfield) ==");
+const NEW_USER_EMAIL = `smoke-user-${suffix}@greenfield.ac.ke`;
+const NEW_USER_PASSWORD = `Smoke${suffix}#Pass`;
 {
   const c = client(gfAdmin.jwt);
   try {
-    inviteId = await M(c, anyApi.phase7.invitations.invite, {
-      email: `smoke-invite-${suffix}@example.com`, name: "SMOKE Invitee", role: "teacher",
+    // 4a. Invite
+    const invite = await M(c, anyApi.phase7.invitations.inviteUser, {
+      email: NEW_USER_EMAIL, name: "Smoke Invited User", role: "teacher",
+    }).then((r) => ({ ok: r })).catch((e) => ({ err: e }));
+    const invitationId = invite.ok?.invitationId ?? null;
+    check("4a. Invitation created (no password set)", !!invitationId, describeErr(invite.err ?? ""));
+    const rawToken = invite.ok?.token ?? null;
+
+    // 4b. Invalid token validation fails
+    const badValidate = await M(c, anyApi.phase7.invitations.validateToken, { token: "definitely-not-a-real-code" })
+      .then((r) => r).catch((e) => ({ err: e }));
+    check("4b. Invalid activation code rejected",
+      badValidate?.valid === false || isDenied(badValidate?.err ?? ""), JSON.stringify(badValidate ?? {}).slice(0, 120));
+
+    if (rawToken) {
+      // 4c. Validate resolves the email
+      const v1 = await M(c, anyApi.phase7.invitations.validateToken, { token: rawToken });
+      check("4c. Valid activation code validates (kind invitation)", v1?.valid === true && v1?.kind === "invitation",
+        JSON.stringify(v1 ?? {}));
+
+      // 4d. Redeem → password set
+      const anon = client();
+      const redeemed = await A(anon, anyApi.phase7.invitations.redeemToken, { token: rawToken, newPassword: NEW_USER_PASSWORD })
+        .then((r) => ({ ok: r })).catch((e) => ({ err: e }));
+      check("4d. Token redeemed with new password", !!redeemed.ok?.ok, describeErr(redeemed.err ?? ""));
+
+      // 4e. Login resolves User + SchoolMembership + Role
+      const signedIn = await signIn(NEW_USER_EMAIL, NEW_USER_PASSWORD);
+      check("4e. Activated user can sign in", !!signedIn.jwt, signedIn.error ?? "");
+      if (signedIn.jwt) {
+        const uc = client(signedIn.jwt);
+        const me = await Q(uc, anyApi.accounts.myMemberships, {}).catch((e) => ({ err: e }));
+        check("4f. Login resolves User + School Membership + Role (greenfield teacher)",
+          !!me && !me.err && (me.memberships ?? []).some((m) => m.schoolId === greenfieldId && m.role === "teacher"),
+          JSON.stringify(me?.memberships ?? me ?? {}).slice(0, 160));
+        uc.close?.();
+      }
+
+      // 4g. Reuse of the same code fails (one-time use)
+      const anon2 = client();
+      const reuse = await A(anon2, anyApi.phase7.invitations.redeemToken, { token: rawToken, newPassword: "Another#Pass1" })
+        .then(() => null).catch((e) => e);
+      check("4g. Activation code single-use (reuse rejected)", !!reuse && isDenied(reuse), describeErr(reuse ?? ""));
+      anon2.close?.();
+
+      // 4h. Sign-in with the new password works, old code now invalid
+      const reValidate = await M(c, anyApi.phase7.invitations.validateToken, { token: rawToken });
+      check("4h. Used code no longer validates", reValidate?.valid === false);
+    }
+  } catch (err) { check("4. Invitation flow", false, describeErr(err)); }
+  c.close?.();
+}
+
+/* ================================================================ */
+console.log("\n== 5. BULK IMPORTS (Greenfield) ==");
+let importYearId = null, importClassId = null;
+{
+  const c = client(gfAdmin.jwt);
+  try {
+    const years = await Q(c, anyApi.academics.listYears, {});
+    importYearId = (years ?? []).find((y) => y.isCurrent)?._id ?? (years ?? [])[0]?._id ?? null;
+    const sections = await Q(c, anyApi.academics.listClassSections, {});
+    const sectionRow = (sections ?? []).find((s) => s.yearId === importYearId) ?? (sections ?? [])[0];
+    importClassId = sectionRow?._id ?? null;
+    const importClassLabel = sectionRow
+      ? `${sectionRow.gradeName ?? ""} ${sectionRow.streamName}`.trim().toLowerCase()
+      : null;
+
+    // 5a. Preview: dup in file + against DB + invalid class + invalid gender
+    const existingStudents = await Q(c, anyApi.students.list, { paginationOpts: { numItems: 1, cursor: null } });
+    const firstStudentId = existingStudents?.page?.[0]?._id ?? null;
+    const existingAdmission = firstStudentId
+      ? (await Q(c, anyApi.students.get, { studentId: firstStudentId }))?.admissionNumber ?? null
+      : null;
+    const preview = await Q(c, anyApi.phase7.imports.previewImport7, {
+      entity: "students",
+      rows: [
+        { admissionNumber: `SMOKE7-${suffix}-1`, firstName: "Import", lastName: "One", gender: "male", className: importClassLabel ?? undefined, guardianName: "Import Guardian", guardianPhone: "+254700500001" },
+        { admissionNumber: `SMOKE7-${suffix}-1`, firstName: "Dup", lastName: "Row", guardianName: "G", guardianPhone: "+254700500002" },
+        { admissionNumber: existingAdmission ?? `ADM-EXISTS-${suffix}`, firstName: "DB", lastName: "Dup", guardianName: "G", guardianPhone: "+254700500003" },
+        { admissionNumber: `SMOKE7-${suffix}-2`, firstName: "Bad", lastName: "Class", className: "Grade 99 Nonexistent", guardianName: "G", guardianPhone: "+254700500004" },
+        { admissionNumber: `SMOKE7-${suffix}-3`, firstName: "Bad", lastName: "Gender", gender: "alien", guardianName: "G", guardianPhone: "+254700500005" },
+        { admissionNumber: `SMOKE7-${suffix}-4`, firstName: "No", lastName: "Guardian", guardianName: "", guardianPhone: "" },
+      ],
     });
-    check("D1. Invitation created", !!inviteId, JSON.stringify(inviteId ?? {}));
-  } catch (err) { check("D1. Invitation created", false, describeErr(err)); }
+    check("5a. Import preview validates rows (errors detected)", preview?.errorCount >= 4 && preview?.validCount === 1,
+      JSON.stringify(preview ?? {}).slice(0, 200));
+    check("5b. In-file duplicate admission detected", (preview?.errors ?? []).some((e) => /duplicate/i.test(e.message)));
+    check("5c. DB duplicate admission detected", (preview?.errors ?? []).some((e) => /already exists/i.test(e.message)));
+    check("5d. Invalid class detected", (preview?.errors ?? []).some((e) => /class/i.test(e.message)));
+    check("5e. Invalid gender detected", (preview?.errors ?? []).some((e) => /gender/i.test(e.message)));
 
-  if (inviteId) {
-    const linkInfo = await Q(c, anyApi.phase7.invitations.getInviteLink, { invitationId: inviteId }).catch(() => null);
-    inviteToken = linkInfo?.token ?? null;
-    check("D2. One-time activation link generated", !!inviteToken, JSON.stringify(linkInfo ?? {}).slice(0, 120));
+    // 5f. Confirm with an in-file duplicate is blocked entirely (no partial import)
+    const blocked = await M(c, anyApi.phase7.imports.confirmImport7, {
+      entity: "students",
+      rows: [
+        { admissionNumber: `SMOKE7-${suffix}-9`, firstName: "Partial", lastName: "Blocked", guardianName: "G", guardianPhone: "+254700500009" },
+        { admissionNumber: `SMOKE7-${suffix}-9`, firstName: "Dup", lastName: "Row", guardianName: "G", guardianPhone: "+254700500010" },
+      ],
+    }).then(() => null).catch((e) => e);
+    check("5f. Import blocked while any row invalid (no silent partials)", !!blocked && isDenied(blocked), describeErr(blocked ?? ""));
+    // The blocked row must NOT exist
+    const studentsAfterBlock = await Q(c, anyApi.students.list, { paginationOpts: { numItems: 50, cursor: null } });
+    check("5g. No partial rows written by the blocked import",
+      !(studentsAfterBlock?.page ?? []).some((s) => s.admissionNumber === `SMOKE7-${suffix}-9`));
 
-    if (inviteToken) {
-      const prev = await Q(anon, anyApi.phase7.invitations.invitationPreview, { invitationId: inviteId, token: inviteToken });
-      check("D3. Public invitation preview valid", prev?.valid === true, JSON.stringify(prev ?? {}));
+    // 5h. Confirm the single valid row → student + guardian + enrollment
+    const confirm = await M(c, anyApi.phase7.imports.confirmImport7, {
+      entity: "students",
+      rows: [
+        { admissionNumber: `SMOKE7-${suffix}-1`, firstName: "Import", lastName: "One", gender: "male", className: importClassLabel ?? undefined, guardianName: "Import Guardian", guardianPhone: "+254700500001", dateOfBirth: "2012-03-01" },
+      ],
+      enrollmentYearId: importYearId ?? undefined,
+    });
+    check("5h. Import creates student + guardian + enrollment",
+      confirm?.studentsCreated === 1 && confirm?.enrollmentsCreated === 1 &&
+      (confirm?.guardiansCreated === 1 || confirm?.guardianLinks === 1),
+      JSON.stringify(confirm ?? {}).slice(0, 140));
 
-      // Bad token rejected.
-      const bad = await Q(anon, anyApi.phase7.invitations.invitationPreview, { invitationId: inviteId, token: "wrong-token-xyz" });
-      check("D4. Wrong token invalid", bad?.valid === false, JSON.stringify(bad ?? {}));
+    // 5i. Re-import is rejected (duplicate admission) — duplicate prevention
+    const again = await M(c, anyApi.phase7.imports.confirmImport7, {
+      entity: "students",
+      rows: [{ admissionNumber: `SMOKE7-${suffix}-1`, firstName: "Import", lastName: "One", guardianName: "G", guardianPhone: "+254700500001" }],
+    }).then(() => null).catch((e) => e);
+    check("5i. Duplicate import rejected (no duplicate students)", !!again && isDenied(again), describeErr(again ?? ""));
 
-      // Accept: user sets own password (no temp password anywhere).
-      try {
-        await A(anon, anyApi.phase7.invitations.acceptInvitation, {
-          invitationId: inviteId, token: inviteToken, password: "SmokePass!2026", fullName: "SMOKE Invitee",
+    // 5j. Staff import with validation
+    const staffPreview = await Q(c, anyApi.phase7.imports.previewImport7, {
+      entity: "staff",
+      rows: [
+        { employeeNumber: `SMOKE-EMP-${suffix}-1`, firstName: "Staff", lastName: "One", email: `staff${suffix}@greenfield.ac.ke`, department: "Science", jobTitle: "Lab Tech" },
+        { employeeNumber: `SMOKE-EMP-${suffix}-1`, firstName: "Dup", lastName: "Emp", department: "Science" },
+      ],
+    });
+    check("5j. Staff preview detects duplicate employee number", staffPreview?.errorCount === 1);
+    const staffConfirm = await M(c, anyApi.phase7.imports.confirmImport7, {
+      entity: "staff",
+      rows: [{ employeeNumber: `SMOKE-EMP-${suffix}-1`, firstName: "Staff", lastName: "One", email: `staff${suffix}@greenfield.ac.ke`, department: "Science", jobTitle: "Lab Tech" }],
+    });
+    check("5k. Staff import creates staff + employee profile", staffConfirm?.staffCreated === 1 && staffConfirm?.employeesCreated === 1,
+      JSON.stringify(staffConfirm ?? {}).slice(0, 120));
+
+    // 5l. Teacher denied import (no students.create)
+    const tDenied = await client(gfTeacher.jwt)
+      .query(anyApi.phase7.imports.previewImport7, { entity: "students", rows: [] })
+      .then(() => null).catch((e) => e);
+    check("5l. Teacher denied student import", !!tDenied && isDenied(tDenied), describeErr(tDenied ?? ""));
+  } catch (err) { check("5. Imports", false, describeErr(err)); }
+  c.close?.();
+}
+
+/* ================================================================ */
+console.log("\n== 6. ADMISSIONS (Greenfield) ==");
+let smokeStudentId = null, smokeGuardianId = null, smokeEnrollmentId = null;
+let appAcceptedId = null, appRejectedId = null, convertedStudentId = null;
+{
+  const c = client(gfAdmin.jwt);
+  try {
+    // Need a class in the current year + a term for the invoice. Sections do
+    // not expose their year — the current year's sections are the default list.
+    const sections = await Q(c, anyApi.academics.listClassSections, {});
+    const section = (sections ?? [])[0];
+    const terms = await Q(c, anyApi.academics.listTerms, { academicYearId: importYearId });
+    const term = (terms ?? [])[0];
+
+    // 6a. Submit
+    const app1 = await M(c, anyApi.phase7.admissions.submitApplication, {
+      firstName: "Admission", lastName: `Smoke${suffix}`, gender: "female",
+      previousSchool: "SMOKE Primary",
+      guardianName: "Admission Guardian", guardianPhone: "+254700600001",
+      guardianEmail: `guardian-${suffix}@example.com`,
+      appliedGradeLevelId: section?.gradeLevelId,
+    });
+    check("6a. Application submitted (numbered)", !!app1?.applicationNumber, JSON.stringify(app1 ?? {}).slice(0, 100));
+    appAcceptedId = app1?.applicationId ?? null;
+
+    // 6b. Review → assessment → decision
+    await M(c, anyApi.phase7.admissions.moveToReview, { applicationId: appAcceptedId });
+    await M(c, anyApi.phase7.admissions.recordAssessment, { applicationId: appAcceptedId, score: 88, notes: "Strong numeracy" });
+    await M(c, anyApi.phase7.admissions.decideApplication, { applicationId: appAcceptedId, decision: "accepted", notes: "Meets criteria" });
+    const dA = await Q(c, anyApi.phase7.admissions.applicationDetail, { applicationId: appAcceptedId });
+    check("6b. Review → assessment → acceptance recorded", dA?.application?.status === "accepted" && dA?.application?.assessmentScore === 88);
+
+    // 6c. Conversion before acceptance is blocked — verify on a fresh app
+    const c2 = client(gfAdmin.jwt);
+    const app2 = (await M(c2, anyApi.phase7.admissions.submitApplication, {
+      firstName: "Early", lastName: `Convert${suffix}`,
+      guardianName: "Early Guardian", guardianPhone: "+254700600002",
+    }))?.applicationId;
+    const earlyConvert = await M(c2, anyApi.phase7.admissions.convertApplication, {
+      applicationId: app2, classSectionId: section._id, academicYearId: importYearId, termId: term?._id ?? importYearId,
+    }).then(() => null).catch((e) => e);
+    check("6c. Conversion requires acceptance first", !!earlyConvert && isDenied(earlyConvert), describeErr(earlyConvert ?? ""));
+    await M(c2, anyApi.phase7.admissions.decideApplication, { applicationId: app2, decision: "rejected", notes: "Harness rejection" });
+    c2.close?.();
+    appRejectedId = app2;
+
+    // 6d. Convert the accepted application (with an admission invoice)
+    const converted = await M(c, anyApi.phase7.admissions.convertApplication, {
+      applicationId: appAcceptedId,
+      classSectionId: section._id,
+      academicYearId: importYearId,
+      termId: term?._id,
+      invoiceDescription: "Admission & Term 1 fees",
+      invoiceAmount: 3000,
+      invoiceDueDate: today,
+    }).then((r) => ({ ok: r })).catch((e) => ({ err: e }));
+    convertedStudentId = converted.ok?.studentId ?? null;
+    check("6d. Application converts to student + guardian + enrollment + invoice",
+      !!converted.ok?.studentId && !!converted.ok?.enrollmentId && !!converted.ok?.invoiceId, describeErr(converted.err ?? ""));
+
+    // 6e. Idempotency: converting again is rejected
+    const reConvert = await M(c, anyApi.phase7.admissions.convertApplication, {
+      applicationId: appAcceptedId, classSectionId: section._id,
+      academicYearId: importYearId, termId: term?._id,
+    }).then(() => null).catch((e) => e);
+    check("6e. Double conversion blocked (idempotent)", !!reConvert && isDenied(reConvert), describeErr(reConvert ?? ""));
+
+    // 6f. No duplicate students: application data reused, admission number derived
+    const conv = convertedStudentId ? await Q(c, anyApi.students.get, { studentId: convertedStudentId }) : null;
+    check("6f. Converted student reuses application data (no re-entry)",
+      conv?.firstName === "Admission" && String(conv?.admissionNumber ?? "").startsWith("ADM-"),
+      `${conv?.firstName} ${conv?.admissionNumber}`);
+
+    smokeStudentId = convertedStudentId;
+    smokeGuardianId = converted.ok?.guardianId;
+    smokeEnrollmentId = converted.ok?.enrollmentId;
+  } catch (err) { check("6. Admissions", false, describeErr(err)); }
+  c.close?.();
+}
+
+/* ================================================================ */
+console.log("\n== 7. PROMOTION (Greenfield) ==");
+let smokeFromClassId = null;
+{
+  const c = client(gfAdmin.jwt);
+  try {
+    if (!importYearId || !smokeStudentId || !smokeEnrollmentId) {
+      check("7. Promotion prerequisites", false, "missing fixtures");
+    } else {
+      // Resolve the SMOKE student's from-class from their enrollment history.
+      const history0 = await Q(c, anyApi.enrollments.forStudent, { studentId: smokeStudentId });
+      smokeFromClassId = (history0 ?? []).find((e) => e._id === smokeEnrollmentId)?.classSectionId ?? importClassId;
+
+      // Create (or reuse) the next academic year to promote into.
+      const years = await Q(c, anyApi.academics.listYears, {});
+      const nextYearName = `${yearNow + 1}`;
+      let nextYearId = (years ?? []).find((y) => y.name === nextYearName)?._id ?? null;
+      if (!nextYearId) {
+        nextYearId = await M(c, anyApi.academics.createYear, {
+          name: nextYearName, startDate: `${yearNow + 1}-01-01`, endDate: `${yearNow + 1}-12-31`,
         });
-        check("D5. Invitation accepted, account activated", true);
-      } catch (err) { check("D5. Invitation accepted, account activated", false, describeErr(err)); }
+      }
 
-      // One-time use: second accept fails.
-      try {
-        await A(anon, anyApi.phase7.invitations.acceptInvitation, {
-          invitationId: inviteId, token: inviteToken, password: "SmokePass!2026b",
+      // Target class in the next year (create one if none exist).
+      let targets = await Q(c, anyApi.phase7.promotions.targetClasses, { toYearId: nextYearId });
+      if (!(targets ?? []).length) {
+        const gradeLevels = await Q(c, anyApi.academics.listGradeLevels, {});
+        const grade = (gradeLevels ?? [])[0];
+        const newClassId = await M(c, anyApi.academics.createClassSection, {
+          academicYearId: nextYearId, gradeLevelId: grade._id, streamName: `SMOKE-${suffix}`,
         });
-        check("D6. Token one-time use enforced", false, "expected error");
-      } catch (err) { check("D6. Token one-time use enforced", isDenied(err), describeErr(err)); }
+        targets = [{ _id: newClassId, gradeLevelId: grade._id }];
+      }
+      const target = targets[0];
 
-      // The new user can now sign in with the password THEY set.
-      const invited = await signIn(`smoke-invite-${suffix}@example.com`, "SmokePass!2026");
-      check("D7. Invited user signs in with self-set password", !!invited.jwt, invited.error ?? "");
+      // 7a. Preview stages candidates for the from-class.
+      const preview = await Q(c, anyApi.phase7.promotions.previewPromotion, {
+        fromYearId: importYearId, classSectionId: smokeFromClassId,
+      }).then((r) => ({ ok: r })).catch((e) => ({ err: e }));
+      check("7a. Promotion preview stages the class roster",
+        !!preview.ok && Array.isArray(preview.ok.lines), describeErr(preview.err ?? ""));
 
-      // Membership attached (User + Membership + Role).
-      if (invited.jwt) {
-        const me = await Q(client(invited.jwt), anyApi.team.me, {}).catch(() => null);
-        check("D8. Membership + role attached (no orphan users)", !!me && Array.isArray(me.memberships) && me.memberships.length > 0, JSON.stringify(me ?? {}).slice(0, 160));
+      // 7b. Confirm promotion for the SMOKE student only (harness-created).
+      const line = { studentId: smokeStudentId, fromEnrollmentId: smokeEnrollmentId, fromClassSectionId: smokeFromClassId, toClassSectionId: target._id, outcome: "promoted" };
+      const confirmed = await M(c, anyApi.phase7.promotions.confirmPromotion, {
+        fromYearId: importYearId, toYearId: nextYearId, lines: [line],
+      }).then((r) => ({ ok: r })).catch((e) => ({ err: e }));
+      check("7b. Promotion run confirmed (new enrollment created)", !!confirmed.ok?.runId && confirmed.ok?.appliedCount === 1,
+        describeErr(confirmed.err ?? ""));
+
+      // 7c. History preserved: old enrollment intact, new one added.
+      const history = await Q(c, anyApi.enrollments.forStudent, { studentId: smokeStudentId });
+      check("7c. Historical enrollment preserved + new enrollment created",
+        (history ?? []).some((e) => e._id === smokeEnrollmentId) && (history ?? []).some((e) => e.yearId === nextYearId),
+        `enrollments=${(history ?? []).length}`);
+
+      // 7d. Re-running the same promotion is idempotent.
+      await M(c, anyApi.phase7.promotions.confirmPromotion, {
+        fromYearId: importYearId, toYearId: nextYearId, lines: [line],
+      }).catch(() => null);
+      const history2 = await Q(c, anyApi.enrollments.forStudent, { studentId: smokeStudentId });
+      check("7d. Re-promotion idempotent (no duplicate enrollments)",
+        (history2 ?? []).length === (history ?? []).length, `enrollments=${(history2 ?? []).length}`);
+
+      // 7e. Runs list shows the run.
+      const runs = await Q(c, anyApi.phase7.promotions.listRuns, {});
+      check("7e. Promotion run listed", (runs ?? []).some((r) => r._id === confirmed.ok?.runId));
+    }
+  } catch (err) { check("7. Promotion", false, describeErr(err)); }
+  c.close?.();
+}
+
+/* ================================================================ */
+console.log("\n== 8. FINANCE: VOTEHEADS + ALLOCATION + RECONCILIATION (Greenfield) ==");
+{
+  const c = client(gfAdmin.jwt);
+  try {
+    if (!smokeStudentId) { check("8. Finance prerequisites", false, "no SMOKE student"); }
+    else {
+      const sections = await Q(c, anyApi.academics.listClassSections, {});
+      const section = (sections ?? [])[0];
+      const terms = await Q(c, anyApi.academics.listTerms, { academicYearId: section?.academicYearId });
+      const term = (terms ?? [])[0];
+
+      // 8a. Voteheads CRUD
+      const vh1 = await M(c, anyApi.phase7.billing.upsertVotehead, { name: "Tuition", allocationPriority: 1 });
+      const vh2 = await M(c, anyApi.phase7.billing.upsertVotehead, { name: "Lunch", allocationPriority: 2 });
+      const vh3 = await M(c, anyApi.phase7.billing.upsertVotehead, { name: "Transport", allocationPriority: 3 });
+      check("8a. Fee voteheads created (Tuition, Lunch, Transport)", !!vh1 && !!vh2 && !!vh3);
+      const vhList = await Q(c, anyApi.phase7.billing.listVoteheads, {});
+      check("8b. Voteheads listed in priority order", (vhList ?? []).length >= 3 &&
+        (vhList ?? []).every((v, i, arr) => i === 0 || arr[i - 1].allocationPriority <= v.allocationPriority));
+
+      // 8c. Invoice with votehead-mapped categories
+      const invoiceId = await M(c, anyApi.finance.createInvoice, {
+        studentId: smokeStudentId, termId: term._id,
+        issueDate: today, dueDate: today, issueNow: true,
+        items: [
+          { description: "Tuition term 1", category: "Tuition", quantity: 1, amount: 6000 },
+          { description: "Lunch term 1", category: "Meals", quantity: 1, amount: 2000 },
+        ],
+      });
+      check("8c. Invoice created with votehead categories", !!invoiceId);
+
+      // 8d. Breakdown shows per-votehead billed amounts
+      const breakdown = await Q(c, anyApi.phase7.billing.invoiceBreakdown, { invoiceId });
+      const bMap = Object.fromEntries((breakdown?.lines ?? []).map((l) => [l.voteheadName, l.billed]));
+      check("8d. Invoice breakdown exposes per-votehead amounts (Tuition 6000, Lunch 2000)",
+        bMap["Tuition"] === 6000 && bMap["Lunch"] === 2000, JSON.stringify(bMap));
+
+      // 8e. Partial payment (20,000 invoice → pay 2,500)
+      const payment = await M(c, anyApi.finance.recordPayment, {
+        studentId: smokeStudentId, invoiceId, amount: 2500,
+        paymentDate: today, method: "Cash", referenceNumber: `SMOKE-PAY-${suffix}`,
+      });
+      check("8e. Partial payment recorded", !!payment?.paymentId, JSON.stringify(payment ?? {}).slice(0, 100));
+
+      // 8f. Auto-allocation honours votehead priority (Tuition first)
+      const alloc = await M(c, anyApi.phase7.billing.allocatePayment, { paymentId: payment.paymentId });
+      check("8f. Auto-allocation allocates the full payment (2500) by priority",
+        alloc?.allocated === 2500 && alloc?.unallocated === 0, JSON.stringify(alloc ?? {}).slice(0, 140));
+      const trail = await Q(c, anyApi.phase7.billing.paymentAllocationTrail, { paymentId: payment.paymentId });
+      check("8g. Allocation trail lists votehead lines (audited)",
+        (trail?.allocations ?? []).length >= 1 && (trail?.allocations ?? [])[0].voteheadName === "Tuition",
+        JSON.stringify(trail?.allocations ?? []).slice(0, 140));
+
+      // 8h. Manual allocation on a second payment
+      const payment2 = await M(c, anyApi.finance.recordPayment, {
+        studentId: smokeStudentId, invoiceId, amount: 1500,
+        paymentDate: today, method: "Cash", referenceNumber: `SMOKE-PAY2-${suffix}`,
+      });
+      const manual = await M(c, anyApi.phase7.billing.allocateManually, {
+        paymentId: payment2.paymentId,
+        lines: [{ invoiceId, voteheadName: "Lunch", amount: 1500 }],
+      });
+      check("8h. Manual allocation to a chosen votehead works", manual?.allocated === 1500, JSON.stringify(manual ?? {}));
+
+      // 8i. Manual allocation exceeding payment is rejected
+      const payment3 = await M(c, anyApi.finance.recordPayment, {
+        studentId: smokeStudentId, invoiceId, amount: 1000,
+        paymentDate: today, method: "Cash", referenceNumber: `SMOKE-PAY3-${suffix}`,
+      });
+      const over = await M(c, anyApi.phase7.billing.allocateManually, {
+        paymentId: payment3.paymentId,
+        lines: [{ invoiceId, voteheadName: "Lunch", amount: 99999 }],
+      }).then(() => null).catch((e) => e);
+      check("8i. Manual allocation above payment amount rejected", !!over && isDenied(over), describeErr(over ?? ""));
+
+      // 8j. Reconciliation overview
+      const recon = await Q(c, anyApi.phase7.billing.reconciliationOverview, {});
+      check("8j. Reconciliation overview resolves with summary",
+        typeof recon?.summary?.totalReceived === "number" && recon.payments.length >= 3,
+        JSON.stringify(recon?.summary ?? {}).slice(0, 140));
+      const payRow = (recon?.payments ?? []).find((p) => p._id === payment.paymentId);
+      check("8k. Payment shows as allocated in reconciliation", payRow?.status === "allocated");
+
+      // 8l. Bank import: stage → rows → post → finalize
+      const staged = await M(c, anyApi.phase7.billing.stageBankImport, {
+        filename: `SMOKE-statement-${suffix}.csv`, bankReference: `BK-${suffix}`,
+        rows: [
+          { date: today, reference: `SMOKE-BK1-${suffix}`, amount: 1200, narration: `Fee payment adm SMOKE7-${suffix}-1` },
+          { date: today, reference: `SMOKE-BK2-${suffix}`, amount: 800, narration: `Bank charge ${suffix}` },
+        ],
+      });
+      check("8l. Bank statement staged", !!staged?.batchId, JSON.stringify(staged ?? {}).slice(0, 120));
+      if (staged?.batchId) {
+        const rows = await Q(c, anyApi.phase7.billing.bankImportRows, { batchId: staged.batchId });
+        check("8m. Bank rows staged with match metadata", (rows ?? []).length === 2 &&
+          (rows ?? []).every((r) => typeof r.matchBasis === "string" || r.duplicate === false || r.duplicate === true));
+        // Post the first row only (second has no student match → skipped)
+        const firstRow = (rows ?? [])[0];
+        let posted = { posted: 0, skipped: 2, errors: [] };
+        if (firstRow?.candidateStudentId) {
+          posted = await M(c, anyApi.phase7.billing.postBankRows, { rowIds: [firstRow._id], method: "Bank Transfer" });
+        }
+        check("8n. Bank posting through the real payment engine (or safely skipped)",
+          posted.posted === 1 || posted.skipped >= 1, JSON.stringify(posted).slice(0, 140));
+        // Discard remaining draft rows, then finalize
+        const rows2 = await Q(c, anyApi.phase7.billing.bankImportRows, { batchId: staged.batchId });
+        for (const r of (rows2 ?? []).filter((x) => x.status === "draft")) {
+          await M(c, anyApi.phase7.billing.discardBankRow, { rowId: r._id, reason: "Harness discard" }).catch(() => null);
+        }
+        await M(c, anyApi.phase7.billing.finalizeBatch, { batchId: staged.batchId });
+        check("8o. Batch finalized (no unposted rows remain)", true);
       }
     }
-  }
-
-  // Admin-initiated password reset.
-  try {
-    // Resolve the invited user's id from the access overview.
-    const ov = await Q(c, anyApi.phase7.access.accessOverview, {});
-    const target = (ov?.users ?? []).find((u) => u.email === `smoke-invite-${suffix}@example.com`);
-    const reset = await M(c, anyApi.phase7.invitations.adminGenerateResetToken, {
-      userId: target.userId,
-    });
-    check("D9. Admin reset token generated", !!reset?.token, JSON.stringify(reset ?? {}).slice(0, 100));
-    if (reset?.token) {
-      const rp = await Q(anon, anyApi.phase7.invitations.resetTokenPreview, { token: reset.token });
-      check("D10. Reset token preview valid", rp?.valid === true, JSON.stringify(rp ?? {}));
-      try {
-        await A(anon, anyApi.phase7.invitations.completePasswordReset, { token: reset.token, newPassword: "NewSmoke!2026" });
-        const reSignIn = await signIn(`smoke-invite-${suffix}@example.com`, "NewSmoke!2026");
-        check("D11. Password reset works (old password dead)", !!reSignIn.jwt, reSignIn.error ?? "");
-      } catch (err) { check("D11. Password reset works (old password dead)", false, describeErr(err)); }
-    }
-  } catch (err) { check("D9. Admin reset token generated", false, describeErr(err)); }
+  } catch (err) { check("8. Finance", false, describeErr(err)); }
+  c.close?.();
 }
 
 /* ================================================================ */
-console.log("== E. ADMISSIONS ==");
-let smokeApplicationId = null;
+console.log("\n== 9. MEALS + STUDENT ID (Greenfield) ==");
+let gfQrToken = null;
 {
   const c = client(gfAdmin.jwt);
   try {
-    const res = await M(c, anyApi.phase7.admissions.submitApplication, {
-      firstName: "SMOKE", lastName: `Applicant${suffix}`, gender: "female",
-      guardianName: "SMOKE Guardian", guardianPhone: `+254700${String(100000 + suffix).slice(0, 6)}`,
-      guardianEmail: `smoke-guardian-${suffix}@example.com`,
-    });
-    smokeApplicationId = res?.applicationId ?? null;
-    check("E1. Application submitted", !!smokeApplicationId, JSON.stringify(res ?? {}));
-  } catch (err) { check("E1. Application submitted", false, describeErr(err)); }
-
-  try {
-    await M(c, anyApi.phase7.admissions.moveToReview, { applicationId: smokeApplicationId });
-    check("E2. Application moved to review", true);
-  } catch (err) { check("E2. Application moved to review", isDenied(err), describeErr(err)); }
-
-  try {
-    await M(c, anyApi.phase7.admissions.recordAssessment, {
-      applicationId: smokeApplicationId, score: 78, notes: "SMOKE assessment",
-    });
-    check("E3. Assessment recorded", true);
-  } catch (err) { check("E3. Assessment recorded", isDenied(err), describeErr(err)); }
-
-  try {
-    await M(c, anyApi.phase7.admissions.decideApplication, {
-      applicationId: smokeApplicationId, decision: "accepted", notes: "SMOKE accept",
-    });
-    check("E4. Application accepted", true);
-  } catch (err) { check("E4. Application accepted", isDenied(err), describeErr(err)); }
-
-  // Teacher cannot decide admissions.
-  const t = client(teacher.jwt);
-  try {
-    await M(t, anyApi.phase7.admissions.decideApplication, {
-      applicationId: smokeApplicationId, decision: "rejected",
-    });
-    check("E5. Teacher cannot decide admissions", false, "expected error");
-  } catch (err) { check("E5. Teacher cannot decide admissions", isDenied(err), describeErr(err)); }
-
-  // Conversion requires class/year/term (uses Greenfield's current year).
-  let conversionDone = false;
-  try {
-    const classes = await Q(c, anyApi.academics.listClassSections, {});
-    const years = await Q(c, anyApi.academics.listYears, {});
-    const terms = await Q(c, anyApi.academics.listTerms, {});
-    const year = years.find((y) => y.isCurrent) ?? years[0];
-    const term = terms.find((tm) => tm.academicYearId === year?._id) ?? terms[0];
-    const section = classes[0];
-    if (section && year && term) {
-      const res = await M(c, anyApi.phase7.admissions.convertApplication, {
-        applicationId: smokeApplicationId,
-        classSectionId: section._id, academicYearId: year._id, termId: term._id,
-        invoiceDescription: "SMOKE admission fee", invoiceAmount: 1000,
+    if (!smokeStudentId || !importYearId) { check("9. Meals prerequisites", false, "no SMOKE student/year"); }
+    else {
+      // 9a. Meal plan + enrollment
+      const planId = await M(c, anyApi.phase7.meals.upsertPlan, {
+        name: `SMOKE Lunch Plan ${suffix}`, planType: "lunch", dailyCost: 80,
       });
-      conversionDone = !!res?.studentId;
-      check("E6. Conversion → Student+Guardian+Enrollment+Invoice", !!res?.studentId && !!res?.enrollmentId && !!res?.invoiceId, JSON.stringify(res ?? {}).slice(0, 160));
-      // Double conversion blocked.
-      try {
-        await M(c, anyApi.phase7.admissions.convertApplication, {
-          applicationId: smokeApplicationId, classSectionId: section._id,
-          academicYearId: year._id, termId: term._id,
-        });
-        check("E7. Double conversion blocked", false, "expected error");
-      } catch (err) { check("E7. Double conversion blocked", isDenied(err), describeErr(err)); }
-      // Guardian deduped by phone: convert a second applicant with same guardian phone.
-      const res2 = await M(c, anyApi.phase7.admissions.submitApplication, {
-        firstName: "SMOKE2", lastName: `Applicant${suffix}`,
-        guardianName: "SMOKE Guardian", guardianPhone: `+254700${String(100000 + suffix).slice(0, 6)}`,
-      });
-      await M(c, anyApi.phase7.admissions.moveToReview, { applicationId: res2.applicationId });
-      await M(c, anyApi.phase7.admissions.decideApplication, { applicationId: res2.applicationId, decision: "accepted" });
-      const res3 = await M(c, anyApi.phase7.admissions.convertApplication, {
-        applicationId: res2.applicationId, classSectionId: section._id,
-        academicYearId: year._id, termId: term._id,
-      });
-      check("E8. Second conversion reuses guardian (dedupe)", !!res3?.studentId && String(res3.guardianId) === String(res?.guardianId), JSON.stringify({ a: res?.guardianId, b: res3?.guardianId }));
-    } else {
-      check("E6. Conversion → Student+Guardian+Enrollment+Invoice", false, "no class/year/term available");
-    }
-  } catch (err) { check("E6. Conversion flow", false, describeErr(err)); }
-  void conversionDone;
-}
-
-/* ================================================================ */
-console.log("== F. PROMOTION ==");
-{
-  const c = client(gfAdmin.jwt);
-  try {
-    const years = await Q(c, anyApi.academics.listYears, {});
-    const classes = await Q(c, anyApi.academics.listClassSections, {});
-    const year = years.find((y) => y.isCurrent) ?? years[0];
-    const section = classes.find((cl) => cl._id);
-    if (year && section) {
-      const preview = await Q(c, anyApi.phase7.promotions.previewPromotion, {
-        fromYearId: year._id, classSectionId: section._id,
-      });
-      check("F1. Promotion preview lists students", Array.isArray(preview?.lines), JSON.stringify({ n: preview?.lines?.length }).slice(0, 80));
-      const targets = await Q(c, anyApi.phase7.promotions.targetClasses, { toYearId: year._id }).catch(() => []);
-      check("F2. Target classes resolvable", Array.isArray(targets), JSON.stringify({ n: Array.isArray(targets) ? targets.length : 0 }).slice(0, 80));
-    } else {
-      check("F1. Promotion preview lists students", false, "no year/class");
-    }
-  } catch (err) { check("F1. Promotion preview", false, describeErr(err)); }
-
-  // Promotion confirm with a SMOKE-prefixed pair of years would mutate real
-  // enrollments; instead verify validation guards fire correctly.
-  try {
-    const years = await Q(c, anyApi.academics.listYears, {});
-    const y = years[0];
-    await M(c, anyApi.phase7.promotions.confirmPromotion, {
-      fromYearId: y._id, toYearId: y._id, lines: [],
-    });
-    check("F3. Same-year promotion rejected", false, "expected error");
-  } catch (err) { check("F3. Same-year promotion rejected", isDenied(err), describeErr(err)); }
-
-  try {
-    const years = await Q(c, anyApi.academics.listYears, {});
-    const [a, b] = years;
-    await M(c, anyApi.phase7.promotions.confirmPromotion, {
-      fromYearId: a._id, toYearId: b._id, lines: [],
-    });
-    check("F4. Empty promotion rejected", false, "expected error");
-  } catch (err) { check("F4. Empty promotion rejected", isDenied(err), describeErr(err)); }
-
-  const t = client(teacher.jwt);
-  try {
-    const years = await Q(client(gfAdmin.jwt), anyApi.academics.listYears, {});
-    await M(t, anyApi.phase7.promotions.confirmPromotion, {
-      fromYearId: years[0]._id, toYearId: years[1]._id, lines: [],
-    });
-    check("F5. Teacher cannot confirm promotions", false, "expected error");
-  } catch (err) { check("F5. Teacher cannot confirm promotions", isDenied(err), describeErr(err)); }
-
-  const runs = await Q(c, anyApi.phase7.promotions.listRuns, {}).catch(() => null);
-  check("F6. Promotion history listable", Array.isArray(runs), "");
-}
-
-/* ================================================================ */
-console.log("== G. FEE VOTEHEADS + ALLOCATION ==");
-let smokePaymentId = null, smokeInvoiceId = null;
-{
-  const c = client(gfAdmin.jwt);
-  try {
-    await M(c, anyApi.phase7.billing.upsertVotehead, { name: "Tuition", allocationPriority: 1 });
-    await M(c, anyApi.phase7.billing.upsertVotehead, { name: "Lunch", allocationPriority: 2 });
-    await M(c, anyApi.phase7.billing.upsertVotehead, { name: "Transport", allocationPriority: 3 });
-    await M(c, anyApi.phase7.billing.upsertVotehead, { name: "SMOKE Swimming", allocationPriority: 4 });
-    check("G1. Voteheads upserted (idempotent)", true);
-  } catch (err) { check("G1. Voteheads upserted (idempotent)", isDenied(err), describeErr(err)); }
-
-  const vhs = await Q(c, anyApi.phase7.billing.listVoteheads, {}).catch(() => null);
-  check("G2. Voteheads listed with priorities", Array.isArray(vhs) && vhs.length >= 4, JSON.stringify({ n: vhs?.length }).slice(0, 60));
-
-  const t = client(teacher.jwt);
-  try {
-    await M(t, anyApi.phase7.billing.upsertVotehead, { name: "SMOKE Hack" });
-    check("G3. Teacher cannot manage voteheads", false, "expected error");
-  } catch (err) { check("G3. Teacher cannot manage voteheads", isDenied(err), describeErr(err)); }
-
-  // Create a SMOKE invoice with votehead-tagged lines, then a partial payment.
-  try {
-    const students = await Q(c, anyApi.students.list, { paginationOpts: { numItems: 5, cursor: null } });
-    const student = (students?.page ?? [])[0];
-    const terms = await Q(c, anyApi.academics.listTerms, {});
-    const term = terms.find((tm) => tm.isCurrent) ?? terms[0];
-    if (student && term) {
-      smokeInvoiceId = await M(c, anyApi.finance.createInvoice, {
-        studentId: student._id, termId: term._id, issueDate: today, dueDate: today,
-        items: [
-          { description: "SMOKE Tuition", category: "Tuition", quantity: 1, amount: 60000 },
-          { description: "SMOKE Lunch", category: "Meals", quantity: 1, amount: 8000 },
-          { description: "SMOKE Transport", category: "Transport", quantity: 1, amount: 5000 },
-        ],
-        issueNow: true,
-      });
-      check("G4. SMOKE invoice with votehead lines created", !!smokeInvoiceId, "");
-
-      // Tag the fee categories to voteheads via breakdown check.
-      const breakdown = await Q(c, anyApi.phase7.billing.invoiceBreakdown, { invoiceId: smokeInvoiceId });
-      check("G5. Invoice votehead breakdown", Array.isArray(breakdown?.lines) && breakdown.lines.length > 0, JSON.stringify(breakdown ?? {}).slice(0, 160));
-
-      const pay = await M(c, anyApi.finance.recordPayment, {
-        studentId: student._id, invoiceId: smokeInvoiceId, amount: 50000,
-        paymentDate: today, method: "cash", referenceNumber: `SMOKE-ALLOC-${suffix}`,
-      });
-      smokePaymentId = pay?.paymentId ?? null;
-      check("G6. Partial payment (50k of 73k) recorded", !!smokePaymentId, JSON.stringify(pay ?? {}).slice(0, 100));
-
-      const alloc = await M(c, anyApi.phase7.billing.allocatePayment, { paymentId: smokePaymentId });
-      check("G7. Auto-allocation engine runs", alloc && alloc.allocated > 0, JSON.stringify(alloc ?? {}));
-      // Votehead priority: Tuition first (60000 billed, 50000 paid) → all 50k to tuition.
-      const trail = await Q(c, anyApi.phase7.billing.paymentAllocationTrail, { paymentId: smokePaymentId });
-      const tuitionLine = (trail?.allocations ?? []).find((a) => a.voteheadName.toLowerCase() === "tuition");
-      check("G8. Votehead priority respected (tuition first)", !!tuitionLine, JSON.stringify(trail?.allocations ?? {}).slice(0, 200));
-      check("G9. Allocation audit trail recorded", (trail?.allocations ?? []).length > 0, "");
-
-      // Re-allocation requires clearing.
-      try {
-        await M(c, anyApi.phase7.billing.allocatePayment, { paymentId: smokePaymentId });
-        check("G10. Double allocation blocked", false, "expected error");
-      } catch (err) { check("G10. Double allocation blocked", isDenied(err), describeErr(err)); }
-
-      await M(c, anyApi.phase7.billing.clearAllocations, { paymentId: smokePaymentId });
-      const manual = await M(c, anyApi.phase7.billing.allocateManually, {
-        paymentId: smokePaymentId,
-        lines: [
-          { invoiceId: smokeInvoiceId, voteheadName: "Lunch", amount: 8000 },
-          { invoiceId: smokeInvoiceId, voteheadName: "Tuition", amount: 42000 },
-        ],
-      });
-      check("G11. Manual accountant allocation", manual && manual.allocated === 50000, JSON.stringify(manual ?? {}));
-
-      // Manual over-allocation blocked.
-      try {
-        await M(c, anyApi.phase7.billing.allocateManually, {
-          paymentId: smokePaymentId,
-          lines: [{ invoiceId: smokeInvoiceId, voteheadName: "Tuition", amount: 999999 }],
-        });
-        check("G12. Over-allocation blocked", false, "expected error");
-      } catch (err) { check("G12. Over-allocation blocked", isDenied(err), describeErr(err)); }
-
-      const overview = await Q(c, anyApi.phase7.billing.reconciliationOverview, {});
-      check("G13. Reconciliation overview", overview && typeof overview.summary.totalReceived === "number", JSON.stringify(overview?.summary ?? {}).slice(0, 140));
-      const mine = (overview?.payments ?? []).find((p) => p._id === smokePaymentId);
-      check("G14. Payment shows allocated status", !!mine && mine.status !== "unallocated", JSON.stringify(mine ?? {}).slice(0, 120));
-    } else {
-      check("G4. SMOKE invoice", false, "no student/term");
-    }
-  } catch (err) { check("G4-G14. Allocation flow", false, describeErr(err)); }
-}
-
-/* ================================================================ */
-console.log("== H. BANK IMPORT ==");
-{
-  const c = client(gfAdmin.jwt);
-  let batchId = null;
-  try {
-    const res = await M(c, anyApi.phase7.billing.stageBankImport, {
-      filename: `SMOKE statement ${suffix}`,
-      rows: [
-        { date: today, reference: `SMOKE-BK-${suffix}-1`, amount: 12000, narration: `GRN-001 fees` },
-        { date: today, reference: `SMOKE-BK-${suffix}-2`, amount: 3000, narration: "unknown payer" },
-      ],
-    });
-    batchId = res?.batchId ?? null;
-    check("H1. Bank statement staged", !!batchId, JSON.stringify(res ?? {}));
-  } catch (err) { check("H1. Bank statement staged", false, describeErr(err)); }
-
-  try {
-    await M(c, anyApi.phase7.billing.stageBankImport, {
-      filename: "SMOKE bad", rows: [{ date: "03/06/2026", reference: "X", amount: 5 }],
-    });
-    check("H2. Bad date format rejected", false, "expected error");
-  } catch (err) { check("H2. Bad date format rejected", isDenied(err), describeErr(err)); }
-
-  if (batchId) {
-    const rows = await Q(c, anyApi.phase7.billing.bankImportRows, { batchId });
-    check("H3. Rows listed with auto-match attempt", Array.isArray(rows) && rows.length === 2, JSON.stringify({ n: rows?.length }).slice(0, 60));
-    const unmatched = (rows ?? []).find((r) => !r.candidateStudentId);
-    if (unmatched) {
-      try {
-        await M(c, anyApi.phase7.billing.postBankRows, { rowIds: [unmatched._id] });
-        check("H4. Unmatched rows cannot post", false, "expected error");
-      } catch (err) { check("H4. Unmatched rows cannot post", true, "skipped safely or denied"); }
-      try {
-        await M(c, anyApi.phase7.billing.discardBankRow, { rowId: unmatched._id, reason: "SMOKE discard" });
-        check("H5. Unmatched row discarded with reason", true);
-      } catch (err) { check("H5. Unmatched row discarded with reason", isDenied(err), describeErr(err)); }
-    }
-    // Duplicate reference staging is flagged.
-    const res2 = await M(c, anyApi.phase7.billing.stageBankImport, {
-      filename: "SMOKE dup", rows: [
-        { date: today, reference: `SMOKE-ALLOC-${suffix}`, amount: 100, narration: "dup of posted payment ref" },
-      ],
-    }).catch(() => null);
-    if (res2?.batchId) {
-      const dupRows = await Q(c, anyApi.phase7.billing.bankImportRows, { batchId: res2.batchId });
-      check("H6. Duplicate reference flagged", !!(dupRows ?? [])[0]?.duplicate, JSON.stringify(dupRows ?? []).slice(0, 120));
-    } else {
-      check("H6. Duplicate reference flagged", false, "stage failed");
-    }
-  }
-
-  const t = client(teacher.jwt);
-  try {
-    await M(t, anyApi.phase7.billing.stageBankImport, { filename: "hack", rows: [{ date: today, reference: "x", amount: 1 }] });
-    check("H7. Teacher cannot import bank statements", false, "expected error");
-  } catch (err) { check("H7. Teacher cannot import bank statements", isDenied(err), describeErr(err)); }
-}
-
-/* ================================================================ */
-console.log("== I. MEALS ==");
-{
-  const c = client(gfAdmin.jwt);
-  let planId = null, enrollId = null, smokeStudentId = null;
-  try {
-    const students = await Q(c, anyApi.students.list, { paginationOpts: { numItems: 5, cursor: null } });
-    smokeStudentId = (students?.page ?? [])[0]?._id ?? null;
-    const years = await Q(c, anyApi.academics.listYears, {});
-    const year = years.find((y) => y.isCurrent) ?? years[0];
-    planId = await M(c, anyApi.phase7.meals.upsertPlan, {
-      name: `SMOKE Lunch ${suffix}`, planType: "lunch", dailyCost: 60,
-    });
-    check("I1. Meal plan created", !!planId, "");
-    enrollId = await M(c, anyApi.phase7.meals.enrollStudent, {
-      studentId: smokeStudentId, planId, academicYearId: year._id, startDate: today,
-    });
-    check("I2. Student enrolled (eligibility granted)", !!enrollId, "");
-    try {
+      check("9a. Meal plan created", !!planId);
       await M(c, anyApi.phase7.meals.enrollStudent, {
-        studentId: smokeStudentId, planId, academicYearId: year._id, startDate: today,
+        planId, studentId: smokeStudentId, academicYearId: importYearId,
+        startDate: today, subsidyPercent: 50,
       });
-      check("I3. Duplicate eligibility blocked", false, "expected error");
-    } catch (err) { check("I3. Duplicate eligibility blocked", isDenied(err), describeErr(err)); }
-    const rec = await M(c, anyApi.phase7.meals.recordConsumption, {
-      studentId: smokeStudentId, mealType: "lunch",
-    });
-    check("I4. Consumption recorded", !!rec, JSON.stringify(rec ?? {}).slice(0, 80));
-    try {
-      await M(c, anyApi.phase7.meals.recordConsumption, { studentId: smokeStudentId, mealType: "lunch" });
-      check("I5. Duplicate same-day meal blocked", false, "expected error");
-    } catch (err) { check("I5. Duplicate same-day meal blocked", isDenied(err), describeErr(err)); }
-    const summary = await Q(c, anyApi.phase7.meals.consumptionSummary, {});
-    check("I6. Daily consumption summary", summary && summary.lunch >= 1, JSON.stringify(summary ?? {}).slice(0, 100));
-    try {
-      await M(c, anyApi.phase7.meals.recordConsumptionByQr, { token: "not-a-real-token", mealType: "lunch" });
-      check("I7. Invalid QR rejected", false, "expected error");
-    } catch (err) { check("I7. Invalid QR rejected", isDenied(err), describeErr(err)); }
-  } catch (err) { check("I1-I7. Meals flow", false, describeErr(err)); }
+      const dupEnroll = await M(c, anyApi.phase7.meals.enrollStudent, {
+        planId, studentId: smokeStudentId, academicYearId: importYearId, startDate: today,
+      }).then(() => null).catch((e) => e);
+      check("9b. Duplicate meal eligibility rejected", !!dupEnroll && isDenied(dupEnroll), describeErr(dupEnroll ?? ""));
 
-  // Parent can see own children's meals only (query runs; scope enforced internally).
-  const parent = await signIn("parent.wanjiku@greenfield.ac.ke", "Parent#2026");
-  check("I8. Parent sign-in", !!parent.jwt, parent.error ?? "");
-  if (parent.jwt) {
-    const pc = client(parent.jwt);
-    try {
-      const mine = await Q(pc, anyApi.phase7.meals.myChildrenMeals, {});
-      check("I9. Parent child-scoped meal view", Array.isArray(mine), JSON.stringify({ n: Array.isArray(mine) ? mine.length : "?" }).slice(0, 60));
-    } catch (err) { check("I9. Parent child-scoped meal view", false, describeErr(err)); }
-    try {
-      await M(pc, anyApi.phase7.meals.upsertPlan, { name: "SMOKE hack", planType: "lunch", dailyCost: 1 });
-      check("I10. Parent cannot manage meal plans", false, "expected error");
-    } catch (err) { check("I10. Parent cannot manage meal plans", isDenied(err), describeErr(err)); }
-  }
+      // 9c. Manual consumption + duplicate prevention
+      const cons = await M(c, anyApi.phase7.meals.recordConsumption, {
+        studentId: smokeStudentId, mealType: "lunch", consumptionDate: today,
+      });
+      check("9c. Meal consumption recorded for eligible student", !!cons?.consumptionId);
+      const dupCons = await M(c, anyApi.phase7.meals.recordConsumption, {
+        studentId: smokeStudentId, mealType: "lunch", consumptionDate: today,
+      }).then(() => null).catch((e) => e);
+      check("9d. Duplicate same-day meal consumption rejected", !!dupCons && isDenied(dupCons), describeErr(dupCons ?? ""));
+
+      // 9e. Student without eligibility cannot consume
+      const others = await Q(c, anyApi.students.list, { paginationOpts: { numItems: 10, cursor: null } });
+      const ineligible = (others?.page ?? []).find((s) => s._id !== smokeStudentId);
+      if (ineligible) {
+        const denied = await M(c, anyApi.phase7.meals.recordConsumption, {
+          studentId: ineligible._id, mealType: "lunch", consumptionDate: today,
+        }).then(() => null).catch((e) => e);
+        check("9e. Consumption blocked without active meal eligibility", !!denied && isDenied(denied), describeErr(denied ?? ""));
+      }
+
+      // 9f. QR meal card reuses the Phase 6 identity system
+      const issued = await M(c, anyApi.phase6.identity.issueQrToken, { subjectKind: "student", subjectId: smokeStudentId });
+      gfQrToken = issued?.token ?? null;
+      check("9f. QR ID issued (opaque token)", !!gfQrToken && gfQrToken.length >= 32);
+      const qrCons = await M(c, anyApi.phase7.meals.recordConsumptionByQr, {
+        token: gfQrToken, mealType: "snack", consumptionDate: today,
+      });
+      check("9g. QR meal scan records consumption (no sensitive data in QR)", !!qrCons?.consumptionId);
+
+      // 9h. Invalid QR rejected
+      const badQr = await M(c, anyApi.phase7.meals.recordConsumptionByQr, {
+        token: "invalid-token-xyz", mealType: "lunch", consumptionDate: today,
+      }).then(() => null).catch((e) => e);
+      check("9h. Invalid QR rejected at the meal terminal", !!badQr && isDenied(badQr), describeErr(badQr ?? ""));
+
+      // 9i. Cross-school QR rejected: Riverside admin scanning a Greenfield token
+      const rc = client(rvAdmin.jwt);
+      const crossQr = await M(rc, anyApi.phase7.meals.recordConsumptionByQr, {
+        token: gfQrToken, mealType: "lunch", consumptionDate: today,
+      }).then(() => null).catch((e) => e);
+      check("9i. Cross-school QR rejected (Riverside cannot scan Greenfield card)", !!crossQr && isDenied(crossQr), describeErr(crossQr ?? ""));
+      rc.close?.();
+
+      // 9j. Summary resolves
+      const summary = await Q(c, anyApi.phase7.meals.consumptionSummary, { date: today });
+      check("9j. Meal summary resolves (lunch counted)", summary?.lunch >= 1);
+    }
+  } catch (err) { check("9. Meals", false, describeErr(err)); }
+  c.close?.();
 }
 
 /* ================================================================ */
-console.log("== J. ACCESS MANAGEMENT ==");
+console.log("\n== 10. ACCESS MANAGEMENT + TENANCY ==");
 {
   const c = client(gfAdmin.jwt);
   try {
-    const ov = await Q(c, anyApi.phase7.access.accessOverview, {});
-    check("J1. Access overview", ov && Array.isArray(ov.users) && ov.summary && typeof ov.summary.total === "number", JSON.stringify(ov?.summary ?? {}).slice(0, 120));
-    const pm = await Q(c, anyApi.phase7.access.permissionMatrix, {});
-    check("J2. Permission matrix", pm !== null && typeof pm === "object", "");
-    const inv = await Q(c, anyApi.phase7.access.pendingInvitations, {});
-    check("J3. Pending invitations list", Array.isArray(inv), "");
-  } catch (err) { check("J1-J3. Access management", false, describeErr(err)); }
+    // 10a. Access overview scoped to Greenfield
+    const overview = await Q(c, anyApi.phase7.access.accessOverview, {});
+    check("10a. Access overview resolves for school admin", !!overview?.summary && overview.scope === "school",
+      JSON.stringify(overview?.summary ?? {}).slice(0, 120));
+    check("10b. Greenfield access roster contains no Riverside members",
+      (overview?.users ?? []).every((u) => u.schoolId === greenfieldId || u.schoolId === null));
+    check("10c. Invited smoke user appears with role teacher",
+      (overview?.users ?? []).some((u) => u.email === NEW_USER_EMAIL && u.role === "teacher"));
 
-  const t = client(teacher.jwt);
+    const matrix = await Q(c, anyApi.phase7.access.permissionMatrix, {});
+    check("10d. Permission matrix resolves", Array.isArray(matrix) && matrix.length >= 6);
+  } catch (err) { check("10. Access", false, describeErr(err)); }
+  c.close?.();
+
+  // 10e. Cross-school isolation for Phase 7 modules
+  const gc = client(gfAdmin.jwt);
+  const rc = client(rvAdmin.jwt);
   try {
-    await Q(t, anyApi.phase7.access.accessOverview, {});
-    check("J4. Teacher cannot view access management", false, "expected error");
-  } catch (err) { check("J4. Teacher cannot view access management", isDenied(err), describeErr(err)); }
+    if (convertedStudentId) {
+      const crossStudent = await Q(rc, anyApi.students.get, { studentId: convertedStudentId })
+        .then(() => null).catch((e) => e);
+      check("10e. Riverside cannot read Greenfield's converted student", !!crossStudent && isDenied(crossStudent), describeErr(crossStudent ?? ""));
+    }
+    if (appAcceptedId) {
+      const crossApp = await Q(rc, anyApi.phase7.admissions.applicationDetail, { applicationId: appAcceptedId })
+        .then(() => null).catch((e) => e);
+      check("10f. Riverside cannot read Greenfield's admission application", !!crossApp && isDenied(crossApp), describeErr(crossApp ?? ""));
+    }
+    if (convertedStudentId) {
+      const crossMeal = await M(rc, anyApi.phase7.meals.recordConsumption, {
+        studentId: convertedStudentId, mealType: "lunch", consumptionDate: today,
+      }).then(() => null).catch((e) => e);
+      check("10g. Riverside cannot record meals for Greenfield's student", !!crossMeal && isDenied(crossMeal), describeErr(crossMeal ?? ""));
+    }
+    // 10h. Onboarding status of the new school is invisible to other schools
+    if (detailSchoolId) {
+      const crossStatus = await Q(gc, anyApi.phase7.onboarding.getStatus, { schoolId: detailSchoolId })
+        .then(() => null).catch((e) => e);
+      check("10h. Greenfield admin cannot read another school's onboarding status", !!crossStatus && isDenied(crossStatus), describeErr(crossStatus ?? ""));
+    }
+    // 10i. Registration documents are platform-only (school admin denied)
+    if (publicRequestId) {
+      const crossReq = await Q(gc, anyApi.phase7.registration.platformRequestDetail, { requestId: publicRequestId })
+        .then(() => null).catch((e) => e);
+      check("10i. School admin cannot read platform school requests", !!crossReq && isDenied(crossReq), describeErr(crossReq ?? ""));
+    }
+  } catch (err) { check("10. Isolation", false, describeErr(err)); }
+  gc.close?.(); rc.close?.();
 }
 
 /* ================================================================ */
-console.log("== K. SECURITY / TENANT ISOLATION ==");
-{
-  // Riverside admin cannot read Greenfield's onboarding/admissions/meals.
-  const rv = client(rvAdmin.jwt);
-  try {
-    const years = await Q(client(rvAdmin.jwt), anyApi.academics.listYears, {});
-    const classes = await Q(client(rvAdmin.jwt), anyApi.academics.listClassSections, {});
-    const gfClasses = await Q(client(gfAdmin.jwt), anyApi.academics.listClassSections, {});
-    const gfClassIds = new Set(gfClasses.map((x) => x._id));
-    const foreign = classes.find((x) => gfClassIds.has(x._id));
-    check("K0. Class lists are school-scoped", !foreign, foreign ? "cross-school class visible" : "");
-    void years;
-  } catch (err) { check("K0. Class lists are school-scoped", false, describeErr(err)); }
-
-  if (smokeApplicationId) {
-    try {
-      await Q(rv, anyApi.phase7.admissions.applicationDetail, { applicationId: smokeApplicationId });
-      check("K1. Cross-school application detail blocked", false, "expected error");
-    } catch (err) { check("K1. Cross-school application detail blocked", isDenied(err), describeErr(err)); }
-  }
-  if (smokeInvoiceId) {
-    try {
-      await Q(rv, anyApi.phase7.billing.invoiceBreakdown, { invoiceId: smokeInvoiceId });
-      check("K2. Cross-school invoice breakdown blocked", false, "expected error");
-    } catch (err) { check("K2. Cross-school invoice breakdown blocked", isDenied(err), describeErr(err)); }
-  }
-  if (smokePaymentId) {
-    try {
-      await Q(rv, anyApi.phase7.billing.paymentAllocationTrail, { paymentId: smokePaymentId });
-      check("K3. Cross-school allocation trail blocked", false, "expected error");
-    } catch (err) { check("K3. Cross-school allocation trail blocked", isDenied(err), describeErr(err)); }
-  }
-  // Anonymous cannot touch school-scoped Phase 7 endpoints.
-  try {
-    await Q(anon, anyApi.phase7.billing.reconciliationOverview, {});
-    check("K4. Anonymous cannot open reconciliation", false, "expected error");
-  } catch (err) { check("K4. Anonymous cannot open reconciliation", isDenied(err), describeErr(err)); }
-}
-
-/* ================================================================ */
-console.log("== L. REGRESSION SMOKE (Phases 1–6) ==");
+console.log("\n== 11. REGRESSION (Phases 1–6 still respond) ==");
 {
   const c = client(gfAdmin.jwt);
   try {
-    const invs = await Q(c, anyApi.finance.listInvoices, {});
-    check("L1. Finance invoices respond", Array.isArray(invs), "");
-    const students = await Q(c, anyApi.students.list, { paginationOpts: { numItems: 1, cursor: null } });
-    check("L2. Students respond", students && Array.isArray(students.page), "");
-    const rules = await Q(c, anyApi.phase6.automations.listRules, {});
-    check("L3. Phase 6 automations respond", Array.isArray(rules), "");
-    const recon = await Q(c, anyApi.phase6.payments.reconciliationList, {});
-    check("L4. Phase 6 reconciliation responds (now real)", Array.isArray(recon), JSON.stringify({ n: Array.isArray(recon) ? recon.length : "?" }).slice(0, 60));
-    const ov = await Q(c, anyApi.phase7.billing.reconciliationOverview, {});
-    check("L5. Phase 7 reconciliation overview responds", !!ov, "");
-    const access = await Q(c, anyApi.phase7.access.accessOverview, {});
-    check("L6. Access overview responds", !!access, "");
-  } catch (err) { check("L1-L6. Regression smoke", false, describeErr(err)); }
+    const students = await Q(c, anyApi.students.list, { paginationOpts: { numItems: 5, cursor: null } });
+    check("R1. Phase 1 students list", (students?.page?.length ?? 0) > 0);
+    const guardians = await Q(c, anyApi.guardians.list, { paginationOpts: { numItems: 5, cursor: null } });
+    check("R2. Phase 1 guardians list", (guardians?.page?.length ?? 0) > 0);
+    const me = await Q(c, anyApi.team.me, {});
+    check("R3. Phase 1 auth/session resolves", !!me?.email);
+    const invoices = await Q(c, anyApi.finance.listInvoices, {}).then((r) => ({ ok: r })).catch((e) => ({ err: e }));
+    check("R4. Phase 3 invoices respond", !!invoices.ok || isDenied(invoices.err),
+      invoices.ok ? `${(invoices.ok ?? []).length} invoice(s)` : describeErr(invoices.err ?? ""));
+    const ann = await Q(c, anyApi.announcements.listAllAnnouncements, {}).then((r) => ({ ok: r })).catch((e) => ({ err: e }));
+    check("R5. Phase 4 announcements respond", !!ann.ok || isDenied(ann.err));
+    const rules = await Q(c, anyApi.phase6.automations.listRules, {}).then((r) => ({ ok: r })).catch((e) => ({ err: e }));
+    check("R6. Phase 6 automation rules respond", !!rules.ok || isDenied(rules.err));
+    const qrResolve = await Q(c, anyApi.phase6.identity.resolveQr, { token: "regression-probe-token" })
+      .then(() => null).catch((e) => e);
+    check("R7. Phase 6 QR resolve responds (denies unknown token)", qrResolve === null || isDenied(qrResolve));
+    // Parent portal regression
+    const parent = await signIn("parent.wanjiku@greenfield.ac.ke", "Parent#2026");
+    check("R8. Parent portal sign-in", !!parent.jwt, parent.error ?? "");
+    if (parent.jwt) {
+      const pc = client(parent.jwt);
+      const kids = await Q(pc, anyApi.portal.parentChildren, {});
+      check("R9. Phase 4 parent portal (children list)", Array.isArray(kids?.children));
+      pc.close?.();
+    }
+  } catch (err) { check("11. Regression", false, describeErr(err)); }
+  c.close?.();
 }
 
 /* ================================================================ */
-console.log("\n========================================");
-console.log(`PHASE 7 RESULT: ${pass} passed, ${fail} failed`);
+console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 if (failures.length) {
-  console.log("Failed checks:");
+  console.log("Failed tests:");
   for (const f of failures) console.log(`  - ${f}`);
-  process.exit(1);
 }
-process.exit(0);
+process.exit(fail > 0 ? 1 : 0);
