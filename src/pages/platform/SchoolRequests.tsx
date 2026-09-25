@@ -30,18 +30,34 @@ export default function SchoolRequests() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
 
-  const requests = useQuery(api.phase7.registration.listRequests, {
+  const requests = useQuery(api.phase7.registration.platformListRequests, {
     status: statusFilter === "all" ? undefined : statusFilter,
   });
   const detail = useQuery(
-    api.phase7.registration.requestDetail,
+    api.phase7.registration.platformRequestDetail,
     detailId ? { requestId: detailId as never } : "skip",
   );
   const review = useMutation(api.phase7.registration.reviewRequest);
+  const approve = useMutation(api.phase7.registration.approveRequest);
+  const reject = useMutation(api.phase7.registration.rejectRequest);
 
   async function decide(requestId: string, decision: "approve" | "reject" | "more_info" | "under_review") {
     try {
-      const res = await review({ requestId: requestId as never, decision, notes: notes || undefined });
+      if (decision === "approve") {
+        await approve({ requestId: requestId as never, notes: notes || undefined });
+      } else if (decision === "reject") {
+        if (!notes.trim()) {
+          toast.error("A rejection reason is required.");
+          return;
+        }
+        await reject({ requestId: requestId as never, reason: notes.trim() });
+      } else {
+        await review({
+          requestId: requestId as never,
+          action: decision === "more_info" ? "more_info" : "start_review",
+          notes: notes || undefined,
+        });
+      }
       toast.success(
         decision === "approve"
           ? "Approved — school workspace and onboarding record created."
@@ -49,7 +65,6 @@ export default function SchoolRequests() {
       );
       setNotes("");
       setDetailId(null);
-      void res;
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Action failed.");
     }
@@ -151,10 +166,10 @@ export default function SchoolRequests() {
                 ) : (
                   <ul className="space-y-1 text-sm">
                     {detail.documents.map((d) => (
-                      <li key={d._id} className="flex items-center gap-2">
+                      <li key={d.documentId} className="flex items-center gap-2">
                         <FileText className="size-3.5 text-muted-foreground" />
                         <span className="capitalize">{d.kind.replace(/_/g, " ")}</span>
-                        <span className="text-xs text-muted-foreground">({d.fileId})</span>
+                        <span className="text-xs text-muted-foreground">({d.filename})</span>
                       </li>
                     ))}
                   </ul>
