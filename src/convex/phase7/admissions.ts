@@ -12,6 +12,7 @@ import type { Id } from "../_generated/dataModel";
 import { requirePermission, getSchoolRecord } from "../session";
 import { recordAudit } from "../audit";
 import { APPLICATION_STATUSES } from "../schema";
+import { ensureStudentAccount, nextNumber, postLedgerTransaction, ACC } from "../finance";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const normPhone = (p: string) => p.replace(/[\s-()]/g, "");
@@ -300,7 +301,6 @@ export const convertApplication = mutation({
     // Optional invoice (entry fee / term 1 fees).
     let invoiceId: Id<"invoices"> | undefined;
     if (invoiceAmount && invoiceAmount > 0) {
-      const { ensureStudentAccount, nextNumber, postLedgerTransaction, ACC } = await import("../finance");
       const accountId = await ensureStudentAccount(ctx, schoolId, studentId);
       const invoiceNumber = await nextNumber(ctx, schoolId, "INV");
       invoiceId = await ctx.db.insert("invoices", {

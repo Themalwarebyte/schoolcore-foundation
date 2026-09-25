@@ -19,6 +19,8 @@ import {
   Megaphone,
   // Phase 5 icons
   Briefcase, Banknote, BookMarked, Bus, BedDouble, Package, ShoppingCart, Stethoscope,
+  // Phase 7 icons
+  UserPlus, ArrowUpRight, UtensilsCrossed, Landmark as LandmarkIcon, ShieldCheck, ListChecks,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuthActions } from "@convex-dev/auth/react";
@@ -86,6 +88,19 @@ const NAV: NavGroup[] = [
       { to: "/finance/discounts", label: "Discounts & Scholarships", icon: HandCoins, permission: "billing.view" },
       { to: "/finance/expenses", label: "Expenses", icon: ClipboardList, permission: "finance.view" },
       { to: "/finance/reports", label: "Financial Reports", icon: TrendingUp, permission: "financial_reports.view" },
+    ],
+  },
+  {
+    heading: "Phase 7 — Commercial",
+    items: [
+      { to: "/admissions", label: "Admissions", icon: UserPlus, permission: "admissions.view" },
+      { to: "/promotions", label: "Promotions", icon: ArrowUpRight, permission: "promotions.manage" },
+      { to: "/finance/voteheads", label: "Fee Voteheads", icon: ListChecks, permission: "billing.voteheads.manage" },
+      { to: "/finance/reconciliation", label: "Reconciliation", icon: LandmarkIcon, permission: "payments.reconcile" },
+      { to: "/finance/bank-imports", label: "Bank Imports", icon: FileSpreadsheet, permission: "bank_imports.view" },
+      { to: "/meals", label: "Meals", icon: UtensilsCrossed, permission: "meals.view" },
+      { to: "/onboarding", label: "Onboarding", icon: ListChecks, permission: "onboarding.view" },
+      { to: "/access", label: "Access Management", icon: ShieldCheck, permission: "users.view" },
     ],
   },
   {

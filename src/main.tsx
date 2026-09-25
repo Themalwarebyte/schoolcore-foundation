@@ -83,6 +83,17 @@ const Boarding = lazy(() => import("./pages/ops/Boarding.tsx"));
 const Inventory = lazy(() => import("./pages/ops/InventoryPage.tsx"));
 const Procurement = lazy(() => import("./pages/ops/Procurement.tsx"));
 const Medical = lazy(() => import("./pages/ops/Medical.tsx"));
+// Phase 7: onboarding, admissions & commercial readiness
+const Onboarding = lazy(() => import("./pages/phase7/Onboarding.tsx"));
+const Admissions = lazy(() => import("./pages/phase7/Admissions.tsx"));
+const Promotions = lazy(() => import("./pages/phase7/Promotions.tsx"));
+const Voteheads = lazy(() => import("./pages/phase7/Voteheads.tsx"));
+const Reconciliation = lazy(() => import("./pages/phase7/Reconciliation.tsx"));
+const BankImports = lazy(() => import("./pages/phase7/BankImports.tsx"));
+const Meals = lazy(() => import("./pages/phase7/Meals.tsx"));
+const AccessManagement = lazy(() => import("./pages/phase7/AccessManagement.tsx"));
+const PlatformSchoolRequests = lazy(() => import("./pages/platform/SchoolRequests.tsx"));
+const Activation = lazy(() => import("./pages/phase7/Activation.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
 // Simple loading fallback for route transitions
@@ -191,6 +202,9 @@ createRoot(document.getElementById("root")!).render(
                 path="/auth"
                 element={<AuthPage redirectAfterAuth="/dashboard" />}
               />
+              {/* Phase 7: public one-time token flows (invitation activation, password reset) */}
+              <Route path="/activate" element={<Activation />} />
+              <Route path="/reset-password" element={<Activation />} />
 
               {/* School administration area */}
               <Route
@@ -245,6 +259,15 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="/inventory" element={<Inventory />} />
                 <Route path="/procurement" element={<Procurement />} />
                 <Route path="/medical" element={<Medical />} />
+                {/* Phase 7: onboarding, admissions & commercial readiness */}
+                <Route path="/onboarding" element={<Onboarding />} />
+                <Route path="/admissions" element={<Admissions />} />
+                <Route path="/promotions" element={<Promotions />} />
+                <Route path="/finance/voteheads" element={<Voteheads />} />
+                <Route path="/finance/reconciliation" element={<Reconciliation />} />
+                <Route path="/finance/bank-imports" element={<BankImports />} />
+                <Route path="/meals" element={<Meals />} />
+                <Route path="/access" element={<AccessManagement />} />
               </Route>
 
               {/* Parent portal (mobile-first, child-scoped) */}
@@ -300,6 +323,7 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="/platform/schools" element={<PlatformSchools />} />
                 <Route path="/platform/users" element={<PlatformUsers />} />
                 <Route path="/platform/activity" element={<PlatformActivity />} />
+                <Route path="/platform/school-requests" element={<PlatformSchoolRequests />} />
               </Route>
 
               <Route path="*" element={<NotFound />} />

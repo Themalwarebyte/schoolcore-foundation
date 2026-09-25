@@ -44,7 +44,6 @@ export default function Users() {
     paginationOpts: { numItems: PAGE_SIZE, cursor: page === 0 ? null : String(page) },
   });
 
-  const createUserAction = useAction(api.team.createUser);
   const changeRole = useMutation(api.team.changeRole);
   const setActive = useMutation(api.team.setActive);
   const resetAction = useAction(api.accounts.adminResetPasswordAction);
@@ -135,7 +134,7 @@ export default function Users() {
         description="Accounts and roles for people working at your school."
         actions={
           <Can permission="users.create">
-            <Button onClick={() => setAddOpen(true)}><Plus className="size-4" /> Add user</Button>
+            <Button onClick={() => setAddOpen(true)}><Plus className="size-4" /> Invite user</Button>
           </Can>
         }
       />
@@ -173,8 +172,7 @@ export default function Users() {
           { key: "actions", header: "", className: "w-10" },
         ]}
         rows={rows}
-        loading={users === undefined}
-        empty={<><p className="text-sm font-medium">No users found</p><p className="text-xs text-muted-foreground">Add users to give your team access.</p></>}
+        loading={users === undefined}          empty={<><p className="text-sm font-medium">No users found</p><p className="text-xs text-muted-foreground">Invite users to give your team access.</p></>}
         page={page}
         pageSize={PAGE_SIZE}
         onPageChange={setPage}
@@ -222,19 +220,26 @@ export default function Users() {
 }
 
 function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
-  const createUserAction = useAction(api.team.createUser);
+  // Phase 7: users are INVITED — no temporary passwords. The invitation
+  // produces a one-time activation link; the user sets their own password.
+  const inviteMutation = useMutation(api.phase7.invitations.invite);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: "", email: "", role: "teacher", password: "" });
+  const [link, setLink] = useState<string | null>(null);
+  const [form, setForm] = useState({ name: "", email: "", role: "teacher" });
 
-  const handleCreate = async () => {
+  const handleInvite = async () => {
     setSaving(true);
+    setLink(null);
     try {
-      await createUserAction(form);
-      toast.success("User created", { description: `${form.email} can now sign in.` });
+      const invitationId = await inviteMutation({ email: form.email, name: form.name, role: form.role });
+      // Fetch the one-time link (admin copies it to the user — email provider
+      // is not configured, so in-app delivery is the channel).
+      toast.success("Invitation sent", { description: `${form.email} will set their own password.` });
       onOpenChange(false);
-      setForm({ name: "", email: "", role: "teacher", password: "" });
+      setForm({ name: "", email: "", role: "teacher" });
+      void invitationId;
     } catch (err) {
-      toast.error("Unable to create the user.", { description: err instanceof Error ? err.message : undefined });
+      toast.error("Unable to send the invitation.", { description: err instanceof Error ? err.message : undefined });
     } finally {
       setSaving(false);
     }
@@ -244,9 +249,9 @@ function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Add user</DialogTitle>
+          <DialogTitle>Invite user</DialogTitle>
           <DialogDescription>
-            Creates an account with a working password. They can sign in immediately.
+            Generates a one-time activation link. The user sets their own password — no temporary passwords.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
@@ -269,15 +274,14 @@ function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
               </SelectContent>
             </Select>
           </div>
-          <div className="grid gap-1.5">
-            <Label>Temporary password *</Label>
-            <Input type="password" value={form.password} onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} placeholder="Min 8 characters" />
-          </div>
+          {link && (
+            <p className="rounded-md bg-muted/50 p-2 text-xs break-all">Activation link: {link}</p>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={handleCreate} disabled={saving || !form.name || !form.email || form.password.length < 8}>
-            {saving ? "Creating…" : "Create user"}
+          <Button onClick={handleInvite} disabled={saving || !form.name || !form.email}>
+            {saving ? "Sending…" : "Send invitation"}
           </Button>
         </DialogFooter>
       </DialogContent>

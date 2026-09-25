@@ -85,19 +85,20 @@ export default function SchoolRequests() {
       <PageHeader
         title="School Requests"
         description="Review and approve new school registrations. Approvals create the school workspace and onboarding record."
-      >
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All requests</SelectItem>
-            <SelectItem value="submitted">Submitted</SelectItem>
-            <SelectItem value="under_review">Under review</SelectItem>
-            <SelectItem value="onboarding">Onboarding</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="rejected">Rejected</SelectItem>
-          </SelectContent>
-        </Select>
-      </PageHeader>
+        actions={
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All requests</SelectItem>
+              <SelectItem value="submitted">Submitted</SelectItem>
+              <SelectItem value="under_review">Under review</SelectItem>
+              <SelectItem value="onboarding">Onboarding</SelectItem>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="rejected">Rejected</SelectItem>
+            </SelectContent>
+          </Select>
+        }
+      />
 
       <div className="p-4 sm:p-6">
         <DataTable
