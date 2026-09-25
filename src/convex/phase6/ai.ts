@@ -10,7 +10,7 @@
  *  - High-stakes decisions (discipline, admissions, scholarships, promotion,
  *    termination, diagnosis) are explicitly out of scope.
  */
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { query } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
 import { requirePermission } from "../session";
@@ -23,12 +23,20 @@ interface Insight {
   severity: "info" | "watch" | "positive";
 }
 
-/** School-wide insights: attendance + academic + fee trends. */
+/**
+ * School-wide insights: attendance + academic + fee trends.
+ * Administration-level surface only: teachers hold ai.view for their own
+ * scoped insights (teacherInsights) but never school-wide aggregates.
+ */
+const SCHOOL_INSIGHT_ROLES = ["school_admin", "principal", "super_admin"] as const;
 export const schoolInsights = query({
   args: {},
   handler: async (ctx) => {
     const session = await requirePermission(ctx, "ai.view");
     const schoolId = session.schoolId as Id<"schools">;
+    if (!SCHOOL_INSIGHT_ROLES.includes(session.role.role as never)) {
+      throw new ConvexError("School-wide AI insights are limited to administrators.");
+    }
     const insights: Insight[] = [];
 
     /* Attendance trend -------------------------------------------------- */

@@ -295,6 +295,24 @@ report/dashboard reconciliation, historical integrity, tenant isolation:
 SMOKE_CONVEX_URL=https://<deployment>.convex.cloud SEED_SECRET=<secret> bun test scripts/phase3.test.ts
 ```
 
+**Phase 6 platform suite** (`scripts/phase6-verify.mjs`) — automation engine
+(rules, trigger→action, run log, dedup), scheduled jobs (the same internal
+entry points the platform cron drives), payment callback security (success,
+duplicate, amount mismatch, unknown ref, safe failure text), communication
+delivery + "not configured" honesty, QR identity (opaque token, revocation,
+cross-school rejection), biometric device auth, GPS transport scoping and
+retention, AI tenancy/RBAC, SaaS entitlements, import/export permission gates,
+and multi-school isolation across every Phase 6 module:
+
+```bash
+bun scripts/phase6-verify.mjs https://<deployment>.convex.cloud
+```
+
+95 checks; all SMOKE-prefixed, idempotent on re-run. Scheduled jobs are
+registered in `src/convex/crons.ts` (overdue invoices, library overdue,
+contract expiry, stock alerts, GPS ping retention) and execute automatically —
+no manual triggering is required in production.
+
 ## Security notes
 
 - A previously committed `.env.keys` (containing a `DOTENV_PRIVATE_KEY_LOCAL`)
