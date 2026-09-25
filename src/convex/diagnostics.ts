@@ -86,6 +86,216 @@ export const runInternal = action({
   },
 });
 
+/* ==================================================================== */
+/* Phase 6 verification bridge                                          */
+/*                                                                      */
+/* The harness (scripts/phase6-verify.mjs) cannot call internal */
+/* mutations directly — these actions expose ONLY the test routines      */
+/* needed to exercise internal entry points (payment callbacks, device   */
+/* events, GPS pings, scheduled jobs, automation runs) plus the read     */
+/* probes that confirm their side effects. Every routine is SMOKE-scoped */
+/* and re-runs are idempotent.                                           */
+/* ==================================================================== */
+
+/**
+ * Insert a SMOKE paymentRequest for callback simulation (no provider call).
+ * A phone number of exactly "0000" marks harness-only rows and is skipped by
+ * the overdue sweep (which looks at invoices, not requests — documented here
+ * for clarity). Returns the request id.
+ */
+export const stageSmokePaymentRequest = internalMutation({
+  args: {
+    schoolId: v.id("schools"),
+    studentId: v.id("students"),
+    invoiceId: v.optional(v.id("invoices")),
+    amount: v.number(),
+    account: v.string(),
+    phone: v.string(),
+    providerRef: v.string(),
+  },
+  handler: async (ctx, a) => {
+    const existing = await ctx.db
+      .query("paymentRequests")
+      .withIndex("by_provider_ref", (q) => q.eq("providerRef", a.providerRef))
+      .first();
+    if (existing) return existing._id;
+    return ctx.db.insert("paymentRequests", {
+      schoolId: a.schoolId, studentId: a.studentId, invoiceId: a.invoiceId,
+      amount: a.amount, account: a.account, phone: a.phone,
+      status: "pending", provider: "smoke_harness",
+      providerRequestId: `SMOKE-REQ-${a.providerRef.slice(-8)}`,
+      providerRef: a.providerRef, initiatedById: undefined,
+      createdAt: Date.now(), updatedAt: Date.now(),
+    });
+  },
+});
+
+/** Read a paymentRequest's final state (id + status only). */
+export const paymentRequestProbe = internalQuery({
+  args: { paymentRequestId: v.id("paymentRequests") },
+  handler: async (ctx, { paymentRequestId }) => {
+    const r = await ctx.db.get(paymentRequestId);
+    if (!r) return null;
+    return { _id: r._id, status: r.status, failureReason: r.failureReason ?? null, amount: r.amount, schoolId: r.schoolId };
+  },
+});
+
+/** Count distinct payments posted for a provider transaction reference. */
+export const paymentsForReferenceProbe = internalQuery({
+  args: { referenceNumber: v.string() },
+  handler: async (ctx, { referenceNumber }) => {
+    const payments = await ctx.db.query("payments").collect();
+    const matches = payments.filter((p) => p.referenceNumber === referenceNumber);
+    return { count: matches.length, paymentIds: matches.map((p) => p._id), schoolIds: matches.map((p) => p.schoolId) };
+  },
+});
+
+/** Count automation runs for a trigger (optionally filtered by target id). */
+export const automationRunsProbe = internalQuery({
+  args: { trigger: v.string(), targetId: v.optional(v.string()) },
+  handler: async (ctx, { trigger, targetId }) => {
+    const runs = await ctx.db.query("automationRuns").collect();
+    const matches = runs.filter((r) => r.trigger === trigger && (!targetId || r.targetId === targetId));
+    return {
+      count: matches.length,
+      statuses: matches.map((r) => r.status),
+      details: matches.map((r) => r.detail ?? ""),
+      automationIds: [...new Set(matches.map((r) => r.automationId))],
+    };
+  },
+});
+
+/** Device-event probe: count deviceEvents for a device (with dup flags). */
+export const deviceEventsProbe = internalQuery({
+  args: { deviceId: v.string() },
+  handler: async (ctx, { deviceId }) => {
+    const events = await ctx.db
+      .query("deviceEvents")
+      .withIndex("by_device", (q) => q.eq("deviceId", deviceId))
+      .collect();
+    return {
+      count: events.length,
+      duplicates: events.filter((e) => e.duplicate).length,
+      processed: events.filter((e) => e.processed).length,
+      attendanceIds: events.map((e) => e.processedAttendanceId ?? null),
+    };
+  },
+});
+
+/** GPS ping probe: count pings for a vehicle (retention check). */
+export const gpsPingsProbe = internalQuery({
+  args: { vehicleId: v.id("vehicles") },
+  handler: async (ctx, { vehicleId }) => {
+    const pings = await ctx.db
+      .query("gpsPings")
+      .withIndex("by_vehicle_time", (q) => q.eq("vehicleId", vehicleId))
+      .collect();
+    return { count: pings.length, recordedAts: pings.map((p) => p.recordedAt) };
+  },
+});
+
+/** Comm-message probe: count messages for a school/event with status split. */
+export const commMessagesProbe = internalQuery({
+  args: { schoolId: v.id("schools"), event: v.string() },
+  handler: async (ctx, { schoolId, event }) => {
+    const msgs = await ctx.db
+      .query("commMessages")
+      .withIndex("by_school", (q) => q.eq("schoolId", schoolId))
+      .collect();
+    const matches = msgs.filter((m) => m.event === event);
+    return {
+      count: matches.length,
+      byStatus: matches.reduce<Record<string, number>>((acc, m) => {
+        acc[m.status] = (acc[m.status] ?? 0) + 1;
+        return acc;
+      }, {}),
+      failureReasons: [...new Set(matches.map((m) => m.failureReason ?? "").filter(Boolean))],
+    };
+  },
+});
+
+/**
+ * Run a Phase 6 scheduled job (the crons.ts entry points) and return its
+ * result. Callable via runInternal so the harness verifies scheduled jobs
+ * execute the same code path the platform cron drives.
+ */
+export const runScheduledJob = action({
+  args: { job: v.string() },
+  handler: async (ctx, { job }): Promise<unknown> => {
+    const jobs: Record<string, () => Promise<unknown>> = {
+      detectOverdueInvoices: () => ctx.runMutation(internal.phase6.scheduled.detectOverdueInvoices, {}),
+      refreshLibraryOverdue: () => ctx.runMutation(internal.phase6.scheduled.refreshLibraryOverdue, {}),
+      notifyExpiringContracts: () => ctx.runMutation(internal.phase6.scheduled.notifyExpiringContracts, {}),
+      emitStockAlerts: () => ctx.runMutation(internal.phase6.scheduled.emitStockAlerts, {}),
+      pruneOldPings: () => ctx.runMutation(internal.phase6.identity.pruneOldPingsInternal, {}),
+    };
+    const fn = jobs[job];
+    if (!fn) throw new Error(`Unknown scheduled job: ${job}`);
+    return await fn();
+  },
+});
+
+/**
+ * Public action bridge for Phase 6 internal routines (name-allowlisted,
+ * same policy as runInternal above). Each entry maps to a single internal
+ * function; the harness drives these to verify internal-only paths.
+ */
+export const runInternal6 = action({
+  args: { name: v.string(), argsJson: v.optional(v.string()) },
+  handler: async (ctx, { name, argsJson }): Promise<unknown> => {
+    const a = (argsJson ? JSON.parse(argsJson) : {}) as Record<string, unknown>;
+    if (name === "stagePaymentRequest") {
+      return await ctx.runMutation(internal.diagnostics.stageSmokePaymentRequest, {
+        schoolId: a.schoolId as never,
+        studentId: a.studentId as never,
+        invoiceId: (a.invoiceId ?? undefined) as never,
+        amount: a.amount as number,
+        account: a.account as string,
+        phone: a.phone as string,
+        providerRef: a.providerRef as string,
+      });
+    }
+    if (name === "paymentRequest") {
+      return await ctx.runQuery(internal.diagnostics.paymentRequestProbe, {
+        paymentRequestId: a.paymentRequestId as never,
+      });
+    }
+    if (name === "paymentsForReference") {
+      return await ctx.runQuery(internal.diagnostics.paymentsForReferenceProbe, {
+        referenceNumber: a.referenceNumber as string,
+      });
+    }
+    if (name === "automationRuns") {
+      return await ctx.runQuery(internal.diagnostics.automationRunsProbe, {
+        trigger: a.trigger as string,
+        targetId: (a.targetId ?? undefined) as never,
+      });
+    }
+    if (name === "deviceEvents") {
+      return await ctx.runQuery(internal.diagnostics.deviceEventsProbe, {
+        deviceId: a.deviceId as string,
+      });
+    }
+    if (name === "gpsPings") {
+      return await ctx.runQuery(internal.diagnostics.gpsPingsProbe, {
+        vehicleId: a.vehicleId as never,
+      });
+    }
+    if (name === "commMessages") {
+      return await ctx.runQuery(internal.diagnostics.commMessagesProbe, {
+        schoolId: a.schoolId as never,
+        event: a.event as string,
+      });
+    }
+    if (name === "paymentCallback") {
+      return await ctx.runMutation(internal.phase6.payments.callbackInternal, {
+        body: a.body as string,
+      });
+    }
+    throw new Error(`Unknown Phase 6 routine: ${name}`);
+  },
+});
+
 /** Read-only census of every audit action ever recorded (all schools). */
 export const auditCensusInternal = internalQuery({
   args: {},
