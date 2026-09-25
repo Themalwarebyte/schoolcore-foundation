@@ -133,7 +133,12 @@ function RoutesTab({ routes }: { routes: Array<{ _id: string; name: string; vehi
             </CardContent>
           </Card>
         ))}
-        {routes.length === 0 ? <p className="text-sm text-muted-foreground">No routes yet.</p> : null}
+        {routes.length === 0 ? (
+          <div className="rounded-xl border p-8 text-center">
+            <p className="text-sm font-medium">No routes yet</p>
+            <p className="mt-1 text-xs text-muted-foreground">Create your first transport route, add its stops, then assign a vehicle.</p>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -279,7 +284,9 @@ function DriversTab({ drivers }: { drivers: Array<{ _id: string; fullName: strin
                 <TableCell><Pill tone={statusTone(d.status)}>{d.status}</Pill></TableCell>
               </TableRow>
             ))}
-            {drivers.length === 0 ? <TableRow><TableCell colSpan={5} className="text-center text-sm text-muted-foreground">No drivers yet.</TableCell></TableRow> : null}
+            {drivers.length === 0 ? (
+                <TableRow><TableCell colSpan={5} className="h-32 text-center"><p className="text-sm font-medium">No drivers yet</p><p className="mt-1 text-xs text-muted-foreground">Add your drivers, then assign them to routes.</p></TableCell></TableRow>
+              ) : null}
           </TableBody>
         </Table>
       </Card>
@@ -380,7 +387,9 @@ function AssignmentsTab({ assignments }: { assignments: Array<{ _id: string; stu
                 </TableCell>
               </TableRow>
             ))}
-            {assignments.length === 0 ? <TableRow><TableCell colSpan={6} className="text-center text-sm text-muted-foreground">No transport assignments yet.</TableCell></TableRow> : null}
+            {assignments.length === 0 ? (
+                <TableRow><TableCell colSpan={6} className="h-32 text-center"><p className="text-sm font-medium">No transport assignments yet</p><p className="mt-1 text-xs text-muted-foreground">Assign students with a transport fee item to a route and vehicle.</p></TableCell></TableRow>
+              ) : null}
           </TableBody>
         </Table>
       </Card>

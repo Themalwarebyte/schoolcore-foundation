@@ -3,6 +3,7 @@ import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/layouts/school-layout";
+import { HelpHint } from "@/components/shared/help-hint";
 import { DataTable } from "@/components/shared/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -94,7 +95,9 @@ export default function Reconciliation() {
   return (
     <>
       <PageHeader
-        title="Reconciliation Centre"
+        title={
+          <span className="flex items-center gap-1.5">Reconciliation Centre <HelpHint text="Choose how received payments should be applied against outstanding charges — automatically by priority, or matched manually against bank statement lines." /></span>
+        }
         description="Every received payment with its allocation status. Auto-allocation follows the school's votehead priority and oldest-balance-first rules; every action is audited."
         actions={
           <Select

@@ -3,6 +3,7 @@ import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/layouts/school-layout";
+import { HelpHint } from "@/components/shared/help-hint";
 import { DataTable } from "@/components/shared/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,7 +33,9 @@ export default function Voteheads() {
   return (
     <>
       <PageHeader
-        title="Fee Voteheads"
+        title={
+          <span className="flex items-center gap-1.5">Fee Items <HelpHint text="Fee Items are the charges on a fee structure — such as tuition, transport, meals and activities. Payments received are applied against these items using your school&#39;s priority rules." /></span>
+        }
         description="The meaning behind every fee line — Tuition, Lunch, Transport, Swimming… Payments are allocated against invoice lines per votehead using school priority rules."
         actions={
           <Button onClick={() => { setName(""); setCode(""); setPriority(""); setDesc(""); setOpen(true); }}>

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { PageHeader } from "@/components/layouts/school-layout";
+import { HelpHint } from "@/components/shared/help-hint";
 import { DataTable } from "@/components/shared/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,7 +34,9 @@ export default function AccessManagement() {
   return (
     <>
       <PageHeader
-        title="Access Management"
+        title={
+          <span className="flex items-center gap-1.5">Access Management <HelpHint text="Invitations let new users securely create their own passwords — no temporary passwords are ever issued. Dormant accounts are flagged here for review." /></span>
+        }
         description="Who has access, to what, and when they last used it. Dormant and inactive accounts are surfaced for review."
         actions={
           <select

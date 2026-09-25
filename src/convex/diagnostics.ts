@@ -79,6 +79,18 @@ export const runInternal = action({
         teacherEmail: "collins.barasa@greenfield.ac.ke",
       });
     }
+    if (name === "publishDemoResults") {
+      return await ctx.runMutation(internal.diagnostics.publishDemoSubjectResults, {});
+    }
+    if (name === "fillDemoGaps") {
+      return await ctx.runMutation(internal.diagnostics.fillDemoGapsInternal, {});
+    }
+    if (name === "generateDemoReportCards") {
+      return await ctx.runMutation(internal.diagnostics.generateDemoReportCardsInternal, {});
+    }
+    if (name === "reverseSmokePayment") {
+      return await ctx.runMutation(internal.diagnostics.reverseSmokePaymentInternal, {});
+    }
     if (name === "auditCensus") {
       return await ctx.runQuery(internal.diagnostics.auditCensusInternal, {});
     }
@@ -299,6 +311,18 @@ export const runInternal6 = action({
         event: (a.event ?? undefined) as never,
       });
     }
+    if (name === "publishDemoResults") {
+      return await ctx.runMutation(internal.diagnostics.publishDemoSubjectResults, {});
+    }
+    if (name === "fillDemoGaps") {
+      return await ctx.runMutation(internal.diagnostics.fillDemoGapsInternal, {});
+    }
+    if (name === "generateDemoReportCards") {
+      return await ctx.runMutation(internal.diagnostics.generateDemoReportCardsInternal, {});
+    }
+    if (name === "reverseSmokePayment") {
+      return await ctx.runMutation(internal.diagnostics.reverseSmokePaymentInternal, {});
+    }
     throw new Error(`Unknown Phase 6 routine: ${name}`);
   },
 });
@@ -324,6 +348,279 @@ export const inviteCodeProbe = internalQuery({
       statuses: matches.map((m) => m.status),
       latestBody: matches[0]?.body ?? null,
     };
+  },
+});
+
+/**
+ * Internal (demo polish): publish the seeded subject results for Greenfield's
+ * Term 1 so the parent/student portals demo real published results, and flip
+ * generated report cards to published. Idempotent: only touches rows that are
+ * still "submitted"/"generated". Run once after seeding a demo deployment.
+ */
+export const publishDemoSubjectResults = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const school = (await ctx.db.query("schools").collect()).find((s) => s.code === "GRN-001");
+    if (!school) return { resultsPublished: 0, cardsPublished: 0 };
+    let resultsPublished = 0;
+    const results = await ctx.db
+      .query("subjectResults")
+      .withIndex("by_school", (q) => q.eq("schoolId", school._id))
+      .collect();
+    const now = Date.now();
+    for (const r of results) {
+      if (r.status === "submitted" || r.status === "approved") {
+        await ctx.db.patch(r._id, { status: "published", publishedAt: now, updatedAt: now });
+        resultsPublished++;
+      }
+    }
+    const cards = await ctx.db
+      .query("reportCards")
+      .withIndex("by_school", (q) => q.eq("schoolId", school._id))
+      .collect();
+    let cardsPublished = 0;
+    for (const c of cards) {
+      if (c.status === "generated") {
+        await ctx.db.patch(c._id, { status: "published", publishedAt: now, updatedAt: now });
+        cardsPublished++;
+      }
+    }
+    return { resultsPublished, cardsPublished };
+  },
+});
+
+/**
+ * Internal (demo polish): generate report cards for Greenfield's current
+ * year/term from published subject results (uses the real generation engine),
+ * then publish them with teacher/principal comments. Idempotent: generation
+ * skips students without approved results; published cards are immutable.
+ */
+export const generateDemoReportCardsInternal = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const school = (await ctx.db.query("schools").collect()).find((s) => s.code === "GRN-001");
+    if (!school) return { generated: 0 };
+    const year = await ctx.db
+      .query("academicYears")
+      .withIndex("by_school", (q) => q.eq("schoolId", school._id))
+      .collect()
+      .then((ys) => ys.find((y) => y.isCurrent) ?? null);
+    if (!year) return { generated: 0 };
+    const terms = await ctx.db
+      .query("terms")
+      .withIndex("by_academic_year", (q) => q.eq("academicYearId", year._id))
+      .collect();
+    const sections = await ctx.db
+      .query("classSections")
+      .withIndex("by_school", (q) => q.eq("schoolId", school._id))
+      .collect();
+    let generated = 0;
+    const subjectNames = new Map(
+      (await ctx.db.query("subjects").withIndex("by_school", (q) => q.eq("schoolId", school._id)).collect()).map(
+        (s) => [s._id, s.name],
+      ),
+    );
+    for (const term of terms.slice(0, 1)) {
+      for (const section of sections.filter((s) => s.academicYearId === year._id)) {
+        const enrolls = await ctx.db
+          .query("enrollments")
+          .withIndex("by_class_section", (q) => q.eq("classSectionId", section._id))
+          .collect();
+        for (const e of enrolls.filter((x) => x.status === "active")) {
+          const existing = await ctx.db
+            .query("reportCards")
+            .withIndex("by_term_student", (q) => q.eq("termId", term._id).eq("studentId", e.studentId))
+            .collect();
+          if (existing.some((r) => r.classSectionId === section._id)) continue;
+          // Per-student, per-term results via the selective student+term index
+          // (a full school scan overflows the 16 MB function read limit).
+          const results = await ctx.db
+            .query("subjectResults")
+            .withIndex("by_student_term", (q) => q.eq("studentId", e.studentId).eq("termId", term._id))
+            .collect()
+            .then((rs) => rs.filter((r) => r.status === "published" || r.status === "approved"));
+          if (results.length === 0) continue;
+          const avg = Math.round(
+            (results.reduce((s, r) => s + r.percentage, 0) / results.length) * 10,
+          ) / 10;
+          await ctx.db.insert("reportCards", {
+            schoolId: school._id,
+            academicYearId: year._id,
+            termId: term._id,
+            studentId: e.studentId,
+            enrollmentId: e._id,
+            classSectionId: section._id,
+            status: "published",
+            overallAverage: avg,
+            overallGrade: avg >= 75 ? "A" : avg >= 65 ? "B" : avg >= 50 ? "C" : "D",
+            subjects: results.map((r) => ({
+              subjectId: r.subjectId,
+              subjectName: subjectNames.get(r.subjectId) ?? "Subject",
+              totalScore: r.totalScore,
+              percentage: r.percentage,
+              gradeLabel: r.gradeLabel,
+              teacherComment: r.percentage >= 65 ? "Good progress this term." : "Needs to revise more at home.",
+              assessments: [],
+            })),
+            classTeacherComment: "A pleasant term with steady effort. Keep reading at home.",
+            principalComment: "Promoted to the next class. Keep up the good work.",
+            publishedAt: Date.now(),
+            updatedAt: Date.now(),
+          } as never);
+          generated++;
+        }
+      }
+    }
+    return { generated };
+  },
+});
+
+/**
+ * Internal (production safety): reverse the security-audit smoke payment
+ * (reference SMOKE-AUD*) so demo/production data contains no test payments.
+ * Idempotent: only touches payments whose reference starts with "SMOKE-".
+ */
+export const reverseSmokePaymentInternal = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const school = (await ctx.db.query("schools").collect()).find((s) => s.code === "GRN-001");
+    if (!school) return { reversed: 0 };
+    const payments = await ctx.db
+      .query("payments")
+      .withIndex("by_school", (q) => q.eq("schoolId", school._id))
+      .collect();
+    const smoke = payments.filter(
+      (p) => p.referenceNumber?.startsWith("SMOKE-") && p.status !== "reversed",
+    );
+    const actor = (await ctx.db.query("users").withIndex("email", (q) => q.eq("email", "admin@greenfield.ac.ke")).first())?._id ?? null;
+    for (const p of smoke) {
+      const receipt = await ctx.db.query("receipts").withIndex("by_payment", (q) => q.eq("paymentId", p._id)).first();
+      if (receipt) await ctx.db.patch(receipt._id, { voidedAt: Date.now() });
+      await ctx.db.patch(p._id, {
+        status: "reversed",
+        reversedAt: Date.now(),
+        reverseReason: "Test payment cleanup (harness artifact)",
+        updatedAt: Date.now(),
+      });
+      if (p.invoiceId) {
+        const inv = await ctx.db.get(p.invoiceId);
+        if (inv) {
+          // Recompute invoice status from non-reversed payments.
+          const pays = await ctx.db.query("payments").withIndex("by_invoice", (q) => q.eq("invoiceId", p.invoiceId!)).collect();
+          const settled = pays.filter((x) => x.status !== "reversed").reduce((s, x) => s + x.amount, 0);
+          const status = settled >= inv.totalAmount - 0.001 ? "paid" : settled > 0 ? "partially_paid" : inv.dueDate < new Date().toISOString().slice(0, 10) ? "overdue" : inv.status;
+          if (status !== inv.status) await ctx.db.patch(inv._id, { status });
+        }
+      }
+    }
+    return { reversed: smoke.length, actor: actor ? "resolved" : "none" };
+  },
+});
+
+/**
+ * Internal (demo polish): fill portal demo gaps for every class enrolled in
+ * the current year — a week of daily attendance, published subject results
+ * per enrolled student (for subjects with a teacher allocation), and one
+ * published assignment per class, so every demo parent sees an active
+ * portal. Idempotent: skips rows that already exist.
+ */
+export const fillDemoGapsInternal = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const school = (await ctx.db.query("schools").collect()).find((s) => s.code === "GRN-001");
+    if (!school) return { sessions: 0, results: 0, assignments: 0 };
+    const schoolId = school._id;
+    const year = await ctx.db
+      .query("academicYears")
+      .withIndex("by_school", (q) => q.eq("schoolId", schoolId))
+      .collect()
+      .then((ys) => ys.find((y) => y.isCurrent) ?? null);
+    if (!year) return { sessions: 0, results: 0, assignments: 0 };
+    const terms = await ctx.db
+      .query("terms")
+      .withIndex("by_academic_year", (q) => q.eq("academicYearId", year._id))
+      .collect();
+    const term1 = terms[0];
+    if (!term1) return { sessions: 0, results: 0, assignments: 0 };
+    const recorder =
+      (await ctx.db.query("users").withIndex("email", (q) => q.eq("email", "grace.wanjiku@greenfield.ac.ke")).first())?._id ??
+      (await ctx.db.query("users").withIndex("email", (q) => q.eq("email", "admin@greenfield.ac.ke")).first())!._id;
+
+    const sections = (await ctx.db.query("classSections").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).collect())
+      .filter((s) => s.academicYearId === year._id);
+    const subjects = await ctx.db.query("subjects").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).collect();
+    const allocations = await ctx.db.query("teacherAllocations").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).collect();
+    const dates = ["2026-02-02", "2026-02-03", "2026-02-04", "2026-02-05", "2026-02-06", "2026-02-09"];
+    let sessions = 0, results = 0, assignments = 0;
+
+    for (const section of sections) {
+      const enrolls = (await ctx.db.query("enrollments").withIndex("by_class_section", (q) => q.eq("classSectionId", section._id)).collect())
+        .filter((e) => e.status === "active");
+      if (enrolls.length === 0) continue;
+
+      for (const date of dates) {
+        const existing = await ctx.db
+          .query("attendanceSessions")
+          .withIndex("by_class_date", (q) => q.eq("classSectionId", section._id).eq("date", date))
+          .first();
+        if (existing) continue;
+        const sessionId = await ctx.db.insert("attendanceSessions", {
+          schoolId, academicYearId: year._id, termId: term1._id, classSectionId: section._id,
+          sessionType: "daily", date, status: "completed", recordedById: recorder, createdAt: Date.now(),
+        } as never);
+        sessions++;
+        for (let idx = 0; idx < enrolls.length; idx++) {
+          const e = enrolls[idx];
+          const status = idx % 9 === 4 ? "absent" : idx % 11 === 7 ? "late" : "present";
+          await ctx.db.insert("attendanceRecords", {
+            schoolId, sessionId, studentId: e.studentId, enrollmentId: e._id,
+            status, recordedById: recorder, updatedAt: Date.now(),
+          } as never);
+        }
+      }
+
+      for (const subject of subjects) {
+        const allocation = allocations.find((a) => a.classSectionId === section._id && a.subjectId === subject._id);
+        if (!allocation) continue;
+        for (const e of enrolls) {
+          const dup = await ctx.db
+            .query("subjectResults")
+            .withIndex("by_student_term", (q) => q.eq("studentId", e.studentId).eq("termId", term1._id))
+            .collect()
+            .then((rs) => rs.some((r) => r.subjectId === subject._id));
+          if (dup) continue;
+          const pct = 55 + ((e.studentId.charCodeAt(e.studentId.length - 1) + subject.name.length) % 35);
+          await ctx.db.insert("subjectResults", {
+            schoolId, academicYearId: year._id, termId: term1._id,
+            classSectionId: section._id, subjectId: subject._id, studentId: e.studentId,
+            enrollmentId: e._id, totalScore: pct, percentage: pct,
+            gradeLabel: pct >= 75 ? "A" : pct >= 65 ? "B" : pct >= 50 ? "C" : "D",
+            status: "published", publishedAt: Date.now(),
+            submittedById: recorder, updatedAt: Date.now(),
+          } as never);
+          results++;
+        }
+      }
+
+      const dupAssignment = await ctx.db
+        .query("assignments")
+        .withIndex("by_school", (q) => q.eq("schoolId", schoolId))
+        .collect()
+        .then((all) => all.some((x) => x.classSectionId === section._id));
+      if (!dupAssignment) {
+        const alloc = allocations.find((a) => a.classSectionId === section._id);
+        await ctx.db.insert("assignments", {
+          schoolId, academicYearId: year._id, termId: term1._id,
+          classSectionId: section._id, subjectId: alloc?.subjectId ?? subjects[0]._id,
+          title: "Holiday Reading & Exercises",
+          instructions: "Complete the exercises in your course book and bring them on the first day after the break.",
+          assignedDate: "2026-02-20", dueDate: "2026-02-27",
+          status: "published", createdById: recorder, publishedAt: Date.now(), createdAt: Date.now(),
+        } as never);
+        assignments++;
+      }
+    }
+    return { sessions, results, assignments };
   },
 });
 

@@ -159,10 +159,17 @@ export function ImportStudentsDialog({
             type="file"
             accept=".csv,text/csv"
             className="hidden"
+            aria-label="Choose CSV file to import"
             onChange={(e) => onFile(e.target.files?.[0] ?? null)}
           />
           {filename && <span className="text-xs text-muted-foreground">{filename} · {rows.length} row(s)</span>}
         </div>
+
+        <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+          Accepted files: CSV (.csv), maximum 1,000 rows per import. The first row must be the
+          column headers from the template. Data is validated before anything is saved, and only
+          authorized staff at your school can see imported records.
+        </p>
 
         {!hasCurrentYear && entity === "students" && (
           <p className="rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">

@@ -334,7 +334,7 @@ export function SchoolLayout() {
 /** Page header used across the app for consistent spacing and hierarchy. */
 export function PageHeader({
   title, description, actions,
-}: { title: string; description?: string; actions?: React.ReactNode }) {
+}: { title: React.ReactNode; description?: string; actions?: React.ReactNode }) {
   return (
     <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div>
