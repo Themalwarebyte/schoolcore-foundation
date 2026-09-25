@@ -12,7 +12,7 @@ import {
 } from "recharts";
 import {
   GraduationCap, UserRound, Users, Grid3X3, CalendarRange, BookOpen, ArrowRight,
-  CalendarCheck, ClipboardCheck, Award, Clock,
+  CalendarCheck, ClipboardCheck, Award, Clock, AlertTriangle, CheckCircle2, ListChecks,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -38,6 +38,60 @@ export default function Dashboard() {
     showTeacherHome ? {} : "skip",
   );
 
+  if (showTeacherHome) {
+    return <TeacherHome data={teacherHome} />;
+  }
+
+  return <AdminHome overview={overview} activity={activity} />;
+
+  /* Metric card definitions shared by the admin dashboard. */
+  function cards(): { label: string; value: number | undefined; icon: typeof GraduationCap; to: string }[] {
+    return [
+      { label: "Total Students", value: overview?.counts.students, icon: GraduationCap, to: "/students" },
+      { label: "Total Staff", value: overview?.counts.staff, icon: UserRound, to: "/staff" },
+      { label: "Teachers", value: overview?.counts.teachers, icon: UserRound, to: "/staff" },
+      { label: "Guardians", value: overview?.counts.guardians, icon: Users, to: "/guardians" },
+      { label: "Active Classes", value: overview?.counts.classes, icon: Grid3X3, to: "/academics/classes" },
+      { label: "Subjects", value: overview?.counts.subjects, icon: BookOpen, to: "/academics/subjects" },
+    ];
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* Admin dashboard (school admins, principals, accountants)                */
+/* ---------------------------------------------------------------------- */
+
+type Overview = {
+  counts: {
+    students: number; staff: number; teachers: number;
+    guardians: number; classes: number; subjects: number;
+  };
+  academicContext: { name: string; startDate: string; endDate: string } | null;
+  studentsByGrade: { name: string; count: number }[];
+  genderDistribution: { male: number; female: number; other: number };
+  recentStudents: { _id: string; fullName: string; admissionNumber: string; studentStatus: string }[];
+};
+
+type Activity = {
+  _id: string; description: string; action: string; userName: string;
+  _creationTime: number;
+}[];
+
+function AdminHome({
+  overview, activity,
+}: { overview: Overview | undefined; activity: Activity | undefined }) {
+  const checklist = useQuery(api.dashboard.setupChecklist, {});
+  const attention = useQuery(api.dashboard.attention, {});
+  const navigate = useNavigate();
+
+  const attentionItems: { label: string; count: number; to: string }[] = attention ? [
+    { label: "students missing details", count: attention.incompleteStudents, to: "/students" },
+    { label: "invoices overdue", count: attention.overdueInvoices, to: "/finance/invoices" },
+    { label: "admission applications to review", count: attention.pendingAdmissions, to: "/admissions" },
+    { label: "leave requests pending", count: attention.pendingLeave, to: "/hr" },
+    { label: "expense claims to approve", count: attention.pendingExpenses, to: "/finance/expenses" },
+  ].filter((i) => i.count > 0) : [];
+
   const cards = [
     { label: "Total Students", value: overview?.counts.students, icon: GraduationCap, to: "/students" },
     { label: "Total Staff", value: overview?.counts.staff, icon: UserRound, to: "/staff" },
@@ -47,15 +101,6 @@ export default function Dashboard() {
     { label: "Subjects", value: overview?.counts.subjects, icon: BookOpen, to: "/academics/subjects" },
   ];
 
-  if (showTeacherHome) {
-    return <TeacherHome data={teacherHome} fallback={<FallbackDashboard />} />;
-  }
-
-  return <FallbackDashboard />;
-
-  /* ---------------------------------------------------------------- */
-
-  function FallbackDashboard() {
   return (
     <div className="page-shell">
       <PageHeader
@@ -73,6 +118,61 @@ export default function Dashboard() {
           </Can>
         }
       />
+
+      {/* Setup progress — shown until the school is fully set up */}
+      {checklist && !checklist.isComplete && (
+        <Card className="card-soft mb-4">
+          <CardContent className="p-4">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="flex items-center gap-2 text-sm font-semibold">
+                <ListChecks className="size-4 text-primary" /> School setup · {checklist.percent}% complete
+              </p>
+              <Link to="/onboarding" className="text-xs font-medium text-primary hover:underline">
+                Continue setup
+              </Link>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-primary transition-all"
+                style={{ width: `${checklist.percent}%` }}
+              />
+            </div>
+            <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
+              {checklist.steps.map((s) => (
+                <span key={s.key} className={`flex items-center gap-1.5 text-xs ${s.done ? "text-muted-foreground" : "font-medium text-foreground"}`}>
+                  {s.done
+                    ? <CheckCircle2 className="size-3.5 text-emerald-600" />
+                    : <span className="size-2 rounded-full border border-muted-foreground" />}
+                  {s.label}
+                </span>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Attention required — actionable, only when there is work */}
+      {attentionItems.length > 0 && (
+        <Card className="card-soft mb-4 border-amber-200 dark:border-amber-900">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <AlertTriangle className="size-4 text-amber-500" /> Attention required
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {attentionItems.map((item) => (
+              <Link
+                key={item.label}
+                to={item.to}
+                className="flex items-center justify-between rounded-lg border p-3 text-sm transition-colors hover:bg-muted/50"
+              >
+                <span><span className="font-semibold">{item.count}</span> {item.label}</span>
+                <ArrowRight className="size-4 text-muted-foreground" />
+              </Link>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Metric cards */}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
@@ -193,7 +293,15 @@ export default function Dashboard() {
                 {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
               </div>
             ) : overview.recentStudents.length === 0 ? (
-              <p className="py-8 text-center text-sm text-muted-foreground">No students admitted yet.</p>
+              <div className="py-8 text-center">
+                <p className="text-sm font-medium">No students yet</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Add students one by one or import your full list to get started.
+                </p>
+                <Button asChild size="sm" className="mt-3">
+                  <Link to="/students">Add students</Link>
+                </Button>
+              </div>
             ) : (
               <div className="divide-y">
                 {overview.recentStudents.map((s) => (
@@ -251,7 +359,6 @@ export default function Dashboard() {
       </div>
     </div>
   );
-  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -279,8 +386,8 @@ type TeacherHomeData = {
 };
 
 function TeacherHome({
-  data, fallback,
-}: { data: TeacherHomeData | null | undefined; fallback: React.ReactNode }) {
+  data,
+}: { data: TeacherHomeData | null | undefined }) {
   if (data === undefined) {
     return (
       <div className="page-shell">
@@ -289,8 +396,8 @@ function TeacherHome({
       </div>
     );
   }
-  // Non-teaching staff fall back to the standard dashboard.
-  if (!data) return fallback;
+  // Non-teaching staff fall back to the standard admin dashboard.
+  if (!data) return <AdminHome overview={undefined} activity={undefined} />;
 
   return (
     <div className="page-shell">
