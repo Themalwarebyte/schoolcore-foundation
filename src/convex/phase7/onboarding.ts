@@ -10,7 +10,7 @@
 import { ConvexError, v } from "convex/values";
 import { mutation, query } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
-import { requirePermission } from "../session";
+import { requirePermission, requirePlatformSession } from "../session";
 import { recordAudit } from "../audit";
 import { createInvitationCore } from "./inviteCore";
 
@@ -51,7 +51,6 @@ export const getStatus = query({
 export const platformList = query({
   args: {},
   handler: async (ctx) => {
-    const { requirePlatformSession } = await import("../session");
     await requirePlatformSession(ctx);
     const rows = await ctx.db.query("onboardingRecords").collect();
     return Promise.all(

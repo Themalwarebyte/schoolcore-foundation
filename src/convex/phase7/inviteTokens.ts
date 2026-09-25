@@ -47,6 +47,56 @@ export const resolveTokenInternal = internalMutation({
 });
 
 /**
+ * Adopt the auth-account user row before completing a redemption.
+ *
+ * The invitation flow pre-creates (or reuses) a `users` row by email and
+ * attaches the school membership + portal links to it. When the invitee had
+ * no password account yet, `createAccount` in redeemToken creates a SECOND
+ * user row — the one sign-in resolves to. Without adoption the invitee signs
+ * in with no school membership (the "account not linked to school" failure).
+ *
+ * This moves memberships and guardian/student portal links onto the
+ * account's user row, then deactivates the orphan row so the duplicate can
+ * never resolve to a membership-less session. Mirrors team.createUser,
+ * which attaches membership to account.user._id for exactly this reason.
+ */
+export const adoptAccountUserInternal = internalMutation({
+  args: { orphanUserId: v.id("users"), accountUserId: v.id("users") },
+  handler: async (ctx, { orphanUserId, accountUserId }) => {
+    if (orphanUserId === accountUserId) return { adopted: false };
+    let movedMemberships = 0, movedLinks = 0;
+    for (const m of await ctx.db
+      .query("schoolMemberships")
+      .withIndex("by_user", (q) => q.eq("userId", orphanUserId))
+      .collect()) {
+      const clash = await ctx.db
+        .query("schoolMemberships")
+        .withIndex("by_user_school", (q) => q.eq("userId", accountUserId).eq("schoolId", m.schoolId))
+        .unique();
+      if (clash) {
+        await ctx.db.patch(clash._id, { role: m.role, status: m.status });
+        await ctx.db.delete(m._id);
+      } else {
+        await ctx.db.patch(m._id, { userId: accountUserId });
+      }
+      movedMemberships++;
+    }
+    for (const link of [
+      ...(await ctx.db.query("guardianPortalLinks").withIndex("by_user", (q) => q.eq("userId", orphanUserId)).collect()),
+      ...(await ctx.db.query("studentPortalLinks").withIndex("by_user", (q) => q.eq("userId", orphanUserId)).collect()),
+    ]) {
+      await ctx.db.patch(link._id, { userId: accountUserId });
+      movedLinks++;
+    }
+    // The orphan row keeps audit history (auditLogs reference it) but must
+    // never sign in or appear as an active account again.
+    await ctx.db.patch(orphanUserId, { isActive: false });
+    await ctx.db.patch(accountUserId, { isActive: true });
+    return { adopted: true, movedMemberships, movedLinks };
+  },
+});
+
+/**
  * Complete a redemption: consume the token, activate the user, accept any
  * matching pending invitation, and audit. Throws if the token was consumed
  * concurrently — single-use is enforced here, at the database step.
