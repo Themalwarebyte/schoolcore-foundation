@@ -3,79 +3,32 @@
  *
  * Rules (spec §11–14):
  *  - No temporary passwords, ever. New accounts receive a one-time activation
- *    link; existing accounts receive a password-reset link.
+ *    code; existing accounts receive a password-reset code.
  *  - Tokens are random (32 chars ≈190 bits), stored ONLY as SHA-256 hashes,
  *    single-use and expiring (invitations 7 days, resets 1 hour).
  *  - Every issue/accept/reset is audited. Used/expired/revoked tokens fail.
  *
- * Email delivery uses the existing Phase 6 communications infrastructure:
- * when the email provider is not configured the message is still queued and
- * logged (commMessages), and the raw token is returned to the inviting admin
- * UI so onboarding can proceed — production setups simply relay it via email.
+ * Structural notes (these modules hit TS7022 circular inference before):
+ *  - Invitation creation lives in `inviteCore.ts` (no api-handle references);
+ *    this module and onboarding both call it.
+ *  - Token redemption leaves live in `inviteTokens.ts`; `redeemToken` is a
+ *    public ACTION because createAccount/modifyAccountCredentials require an
+ *    action context.
  */
 import { ConvexError, v } from "convex/values";
-import { internalMutation, internalQuery, mutation, query } from "../_generated/server";
+import { action, internalQuery, mutation, query } from "../_generated/server";
 import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
-import { getSession, requirePermission } from "../session";
+import { requirePermission } from "../session";
 import { recordAudit } from "../audit";
 import { createAccount, retrieveAccount, modifyAccountCredentials } from "@convex-dev/auth/server";
 import { randomToken } from "../phase6/constants";
-import { ROLES, type Role } from "../schema";
+import { createInvitationCore, sha256Hex } from "./inviteCore";
 
-const INVITE_TTL_MS = 7 * 24 * 3600 * 1000;
 const RESET_TTL_MS = 3600 * 1000;
-const SCHOOL_ASSIGNABLE: Role[] = ["school_admin", "principal", "teacher", "accountant", "parent", "student"];
-
-async function sha256Hex(input: string): Promise<string> {
-  const data = new TextEncoder().encode(input);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-/** Create (or reuse) the user row behind an email without a password. */
-export const ensureUserForInvitationInternal = internalMutation({
-  args: { email: v.string(), name: v.optional(v.string()) },
-  handler: async (ctx, { email, name }) => {
-    const normalized = email.trim().toLowerCase();
-    if (!normalized.includes("@")) throw new ConvexError("Enter a valid email address.");
-    const users = await ctx.db
-      .query("users")
-      .withIndex("email", (q) => q.eq("email", normalized))
-      .collect();
-    if (users.length > 0) return { userId: users[0]._id, existed: true };
-    // User rows start WITHOUT a password account; one is created only when
-    // the activation token is redeemed (setPasswordInternal).
-    const userId = await ctx.db.insert("users", {
-      email: normalized,
-      name: name?.trim() || normalized.split("@")[0],
-      isActive: true,
-    });
-    return { userId: userId as Id<"users">, existed: false };
-  },
-});
-
-/** Queue the invite/activation email through Phase 6 comms (audited there). */
-async function queueTokenEmail(
-  ctx: { insert: (table: "commMessages", doc: Record<string, unknown>) => Promise<Id<"commMessages">> },
-  args: { schoolId: Id<"schools"> | undefined; toUserId: Id<"users"> | undefined; address: string; subject: string; body: string; event: string },
-) {
-  await ctx.insert("commMessages", {
-    schoolId: args.schoolId,
-    channel: "email",
-    event: args.event,
-    recipientKind: "custom",
-    recipientUserId: args.toUserId,
-    recipientAddress: args.address,
-    body: `${args.subject}\n\n${args.body}`,
-    status: "queued",
-    attempts: 0,
-    queuedAt: Date.now(),
-  });
-}
 
 /* ------------------------------------------------------------------ */
-/* Admin: invite a user (creates user row + membership + token)         */
+/* Admin: invite a user (user row + membership + token)                 */
 /* ------------------------------------------------------------------ */
 
 export const inviteUser = mutation({
@@ -90,96 +43,17 @@ export const inviteUser = mutation({
   handler: async (ctx, { email, name, role, guardianId, studentId }) => {
     const session = await requirePermission(ctx, "users.create");
     const schoolId = session.schoolId as Id<"schools">;
-    const normalized = email.trim().toLowerCase();
-    if (!normalized.includes("@")) throw new ConvexError("Enter a valid email address.");
-    if (!SCHOOL_ASSIGNABLE.includes(role as Role)) {
-      throw new ConvexError("This role cannot be invited within a school.");
-    }
-    if (role === "school_admin" && !["school_admin", "super_admin"].includes(session.role.role)) {
-      throw new ConvexError("Only an administrator can invite school administrators.");
-    }
-
-    const { userId, existed } = await ctx.runMutation(internal.phase7.invitations.ensureUserForInvitationInternal, {
-      email: normalized,
+    if (!schoolId) throw new ConvexError("Select a school to continue.");
+    const result = await createInvitationCore(ctx, {
+      session,
+      schoolId,
+      email,
       name,
-    });
-    await ctx.runMutation(internal.accounts.addMembershipInternal, {
-      userId,
-      schoolId,
       role,
-      createdById: session.userId,
+      guardianId,
+      studentId,
     });
-
-    // Parent/student portal links ride along on invitation (Phase 4 model).
-    if (role === "parent" && guardianId) {
-      await ctx.db.insert("guardianPortalLinks", {
-        schoolId,
-        guardianId,
-        userId,
-        invitedById: session.userId,
-        invitedAt: Date.now(),
-        status: "active",
-      });
-    }
-    if (role === "student" && studentId) {
-      await ctx.db.insert("studentPortalLinks", {
-        schoolId,
-        studentId,
-        userId,
-        invitedById: session.userId,
-        invitedAt: Date.now(),
-        status: "active",
-      });
-    }
-
-    // Expire superseded pending invitations for the same email+school.
-    const stale = await ctx.db
-      .query("invitations")
-      .withIndex("by_email", (q) => q.eq("email", normalized))
-      .collect()
-      .then((rs) => rs.filter((r) => r.schoolId === schoolId && r.status === "pending"));
-    for (const s of stale) await ctx.db.patch(s._id, { status: "revoked" });
-
-    const rawToken = randomToken();
-    const tokenHash = await sha256Hex(rawToken);
-    const now = Date.now();
-    const invitationId = await ctx.db.insert("invitations", {
-      schoolId,
-      email: normalized,
-      name: name?.trim(),
-      role,
-      status: "pending",
-      invitedById: session.userId,
-      invitedAt: now,
-      expiresAt: now + INVITE_TTL_MS,
-    });
-    await ctx.db.insert("activationTokens", {
-      userId,
-      schoolId,
-      kind: "invitation",
-      tokenHash,
-      status: "pending",
-      createdById: session.userId,
-      createdAt: now,
-      expiresAt: now + INVITE_TTL_MS,
-    });
-
-    await queueTokenEmail(ctx, {
-      schoolId,
-      toUserId: userId,
-      address: normalized,
-      event: "portal_invite",
-      subject: "You have been invited to SchoolCore",
-      body: `Set your password to activate your ${role} account. Your one-time activation code: ${rawToken}`,
-    });
-
-    await recordAudit(ctx, {
-      userId: session.userId, schoolId, action: "invitation.created",
-      entityType: "invitations", entityId: invitationId,
-      description: `Invited ${normalized} as ${role}${existed ? " (existing account)" : ""}`,
-      metadata: { role, email: normalized },
-    });
-    return { invitationId, userId, existed, token: rawToken };
+    return result;
   },
 });
 
@@ -235,56 +109,33 @@ export const revokeInvitation = mutation({
 /** Public: validate a token (no secrets returned). */
 export const validateToken = mutation({
   args: { token: v.string() },
-  handler: async (ctx, { token }) => {
+  handler: async (ctx, { token }): Promise<{
+    valid: boolean;
+    reason?: string;
+    kind?: string;
+    email?: string;
+    name?: string | null;
+  }> => {
     if (!token.trim()) throw new ConvexError("Activation code is required.");
     const tokenHash = await sha256Hex(token.trim());
-    const row = await ctx.db
-      .query("activationTokens")
-      .withIndex("by_hash", (q) => q.eq("tokenHash", tokenHash))
-      .first();
-    if (!row || row.status !== "pending") {
-      return { valid: false as const, reason: "invalid_or_used" as const };
-    }
-    if (row.expiresAt < Date.now()) {
-      await ctx.db.patch(row._id, { status: "expired" });
-      return { valid: false as const, reason: "expired" as const };
-    }
-    const user = await ctx.db.get(row.userId);
-    if (!user) return { valid: false as const, reason: "invalid_or_used" as const };
-    return {
-      valid: true as const,
-      kind: row.kind as "invitation" | "activation" | "password_reset",
-      email: user.email ?? "",
-      name: user.name ?? null,
+    const target = (await ctx.runMutation(internal.phase7.inviteTokens.resolveTokenInternal, {
+      tokenHash,
+    })) as {
+      valid: boolean;
+      reason?: string;
+      kind?: string;
+      email?: string;
+      name?: string | null;
+      tokenId?: unknown;
+      userId?: unknown;
     };
-  },
-});
-
-/** Internal: set the password on the token's user (called by redeemToken). */
-export const setPasswordInternal = internalMutation({
-  args: { userId: v.id("users"), password: v.string(), tokenId: v.id("activationTokens") },
-  handler: async (ctx, { userId, password, tokenId }) => {
-    if (password.length < 8) throw new ConvexError("Password must be at least 8 characters.");
-    const user = await ctx.db.get(userId);
-    if (!user || !user.email) throw new ConvexError("Account not found.");
-    const account = await retrieveAccount(ctx, {
-      provider: "password",
-      account: { id: user.email },
-    }).catch(() => null);
-    if (account) {
-      await modifyAccountCredentials(ctx, {
-        provider: "password",
-        account: { id: user.email, secret: password },
-      });
-    } else {
-      await createAccount(ctx, {
-        provider: "password",
-        account: { id: user.email, secret: password },
-        profile: { email: user.email, name: user.name ?? undefined },
-      });
-    }
-    await ctx.db.patch(tokenId, { status: "used", usedAt: Date.now() });
-    await ctx.db.patch(userId, { isActive: true });
+    if (!target.valid) return { valid: false, reason: target.reason };
+    return {
+      valid: true,
+      kind: target.kind,
+      email: target.email,
+      name: target.name ?? null,
+    };
   },
 });
 
@@ -293,45 +144,55 @@ export const setPasswordInternal = internalMutation({
  * audited. This is how invitations activate AND how resets complete — no
  * temporary passwords exist anywhere in the flow.
  */
-export const redeemToken = mutation({
+export const redeemToken = action({
   args: { token: v.string(), newPassword: v.string() },
-  handler: async (ctx, { token, newPassword }) => {
+  handler: async (ctx, { token, newPassword }): Promise<{ ok: boolean; kind: string }> => {
     if (!token.trim()) throw new ConvexError("Activation code is required.");
     if (newPassword.length < 8) throw new ConvexError("Password must be at least 8 characters.");
     const tokenHash = await sha256Hex(token.trim());
-    const row = await ctx.db
-      .query("activationTokens")
-      .withIndex("by_hash", (q) => q.eq("tokenHash", tokenHash))
-      .first();
-    if (!row || row.status !== "pending") throw new ConvexError("This activation code is invalid or has already been used.");
-    if (row.expiresAt < Date.now()) {
-      await ctx.db.patch(row._id, { status: "expired" });
-      throw new ConvexError("This activation code has expired. Request a new one.");
+    const target = (await ctx.runMutation(internal.phase7.inviteTokens.resolveTokenInternal, {
+      tokenHash,
+    })) as {
+      valid: boolean;
+      reason?: string;
+      email: string;
+      name?: string | null;
+      tokenId: { toString: () => string };
+      userId: { toString: () => string };
+    };
+    if (!target.valid) {
+      throw new ConvexError(
+        target.reason === "expired"
+          ? "This activation code has expired. Request a new one."
+          : target.reason === "account_disabled"
+            ? "This account is disabled."
+            : "This activation code is invalid or has already been used.",
+      );
     }
-    const user = await ctx.db.get(row.userId);
-    if (!user || user.isActive === false) throw new ConvexError("This account is disabled.");
-    await ctx.runMutation(internal.phase7.invitations.setPasswordInternal, {
-      userId: row.userId,
-      password: newPassword,
-      tokenId: row._id,
-    });
-    // Mark any matching invitation accepted.
-    if (user.email) {
-      const invs = await ctx.db
-        .query("invitations")
-        .withIndex("by_email", (q) => q.eq("email", user.email))
-        .collect()
-        .then((rs) => rs.filter((r) => r.status === "pending" && r.schoolId === row.schoolId));
-      for (const inv of invs) {
-        await ctx.db.patch(inv._id, { status: "accepted", acceptedAt: Date.now(), acceptedByUserId: row.userId });
-      }
+    // Set the password credential (action context required by auth server).
+    const account = await retrieveAccount(ctx, {
+      provider: "password",
+      account: { id: target.email },
+    }).catch(() => null);
+    if (account) {
+      await modifyAccountCredentials(ctx, {
+        provider: "password",
+        account: { id: target.email, secret: newPassword },
+      });
+    } else {
+      await createAccount(ctx, {
+        provider: "password",
+        account: { id: target.email, secret: newPassword },
+        profile: { email: target.email, name: target.name ?? undefined },
+      });
     }
-    await recordAudit(ctx, {
-      userId: row.userId, schoolId: row.schoolId, action: `activation.${row.kind}_redeemed`,
-      entityType: "activationTokens", entityId: row._id,
-      description: `One-time ${row.kind.replace("_", " ")} code redeemed for ${user.email}`,
+    // Consume the token + accept invitations. Re-checked here, so a race can
+    // never redeem one code twice.
+    await ctx.runMutation(internal.phase7.inviteTokens.completeRedemptionInternal, {
+      tokenId: target.tokenId as never,
+      userId: target.userId as never,
     });
-    return { ok: true, kind: row.kind };
+    return { ok: true, kind: "redeemed" };
   },
 });
 
@@ -367,16 +228,31 @@ export const requestPasswordReset = mutation({
       createdAt: now,
       expiresAt: now + RESET_TTL_MS,
     });
-    await queueTokenEmail(ctx, {
-      schoolId: undefined,
-      toUserId: user._id,
-      address: normalized,
-      event: "custom",
-      subject: "Reset your SchoolCore password",
-      body: `Use this one-time code within the next hour to reset your password: ${rawToken}`,
-    });
+    // commMessages are school-scoped; queue the email when the user belongs to
+    // a school. Platform-only accounts still receive the token via the UI.
+    const memberships = await ctx.db
+      .query("schoolMemberships")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .collect();
+    const schoolId = memberships.find((m) => m.status === "active" && m.schoolId)?.schoolId as
+      | Id<"schools">
+      | undefined;
+    if (schoolId) {
+      await ctx.db.insert("commMessages", {
+        schoolId,
+        channel: "email",
+        event: "custom",
+        recipientKind: "custom",
+        recipientUserId: user._id,
+        recipientAddress: normalized,
+        body: `Reset your SchoolCore password\n\nUse this one-time code within the next hour to reset your password: ${rawToken}`,
+        status: "queued",
+        attempts: 0,
+        queuedAt: Date.now(),
+      });
+    }
     await recordAudit(ctx, {
-      userId: user._id, action: "activation.password_reset_requested",
+      userId: user._id, schoolId: schoolId ?? null, action: "activation.password_reset_requested",
       entityType: "users", entityId: user._id,
       description: `Password reset requested for ${normalized}`,
     });
@@ -386,7 +262,7 @@ export const requestPasswordReset = mutation({
   },
 });
 
-/** Admin-initiated reset: generate a link for an existing user (no password). */
+/** Admin-initiated reset: generate a code for an existing user (no password). */
 export const adminResetLink = mutation({
   args: { userId: v.id("users") },
   handler: async (ctx, { userId }) => {
@@ -421,18 +297,22 @@ export const adminResetLink = mutation({
       createdAt: now,
       expiresAt: now + RESET_TTL_MS,
     });
-    await queueTokenEmail(ctx, {
+    await ctx.db.insert("commMessages", {
       schoolId,
-      toUserId: userId,
-      address: user.email,
+      channel: "email",
       event: "custom",
-      subject: "Reset your SchoolCore password",
-      body: `An administrator started a password reset for your account. One-time code (valid 1 hour): ${rawToken}`,
+      recipientKind: "custom",
+      recipientUserId: userId,
+      recipientAddress: user.email,
+      body: `Reset your SchoolCore password\n\nAn administrator started a password reset for your account. One-time code (valid 1 hour): ${rawToken}`,
+      status: "queued",
+      attempts: 0,
+      queuedAt: Date.now(),
     });
     await recordAudit(ctx, {
       userId: session.userId, schoolId, action: "activation.password_reset_issued",
       entityType: "users", entityId: userId,
-      description: `Password reset link generated for ${user.email}`,
+      description: `Password reset code generated for ${user.email}`,
     });
     return { ok: true, token: rawToken, email: user.email };
   },

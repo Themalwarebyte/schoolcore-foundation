@@ -14,10 +14,10 @@
  */
 import { ConvexError, v } from "convex/values";
 import { internalMutation, mutation, query } from "../_generated/server";
-import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
-import { getSession, requirePlatformSession } from "../session";
+import { requirePlatformSession } from "../session";
 import { recordAudit } from "../audit";
+import { createInvitationCore } from "./inviteCore";
 
 const SCHOOL_TYPES = ["public", "private", "international", "community", "faith_based"] as const;
 const STATUS_FLOW: Record<string, string[]> = {
@@ -90,17 +90,26 @@ export const submitRequest = mutation({
       contactEmail,
       contactPhone: args.contactPhone?.trim(),
       status: "submitted",
-      createdById: undefined,
       createdAt: now,
     });
-    // The free-text notes are stored in the audit trail only (no column needed).
-    await recordAudit(ctx, {
-      userId: args.contactEmail as never,
-      action: "school_request.submitted",
-      entityType: "schoolRequests",
-      entityId: requestId,
-      description: `Registration request submitted for "${schoolName}" (${email})${args.notes ? `: ${args.notes.slice(0, 200)}` : ""}`,
-    });
+    // Public submission has no authenticated actor to attribute. auditLogs
+    // rows require a real user id, so the request row itself (createdAt,
+    // status, contact) is the submission record; every REVIEW action below is
+    // audited against the acting super admin. Attribute the audit entry when
+    // the contact email already maps to an account (re-submission case).
+    const contactUser = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", contactEmail))
+      .first();
+    if (contactUser) {
+      await recordAudit(ctx, {
+        userId: contactUser._id,
+        action: "school_request.submitted",
+        entityType: "schoolRequests",
+        entityId: requestId,
+        description: `Registration request submitted for "${schoolName}" (${email})${args.notes ? `: ${args.notes.slice(0, 200)}` : ""}`,
+      });
+    }
     return { requestId };
   },
 });
@@ -118,7 +127,7 @@ export const attachRequestDocument = mutation({
     if (!["registration_certificate", "logo", "supporting"].includes(kind)) {
       throw new ConvexError("Unknown document kind.");
     }
-    if (bytes.length > 5 * 1024 * 1024) throw new ConvexError("File exceeds the 5MB limit.");
+    if (bytes.byteLength > 5 * 1024 * 1024) throw new ConvexError("File exceeds the 5MB limit.");
     const request = await ctx.db.get(requestId);
     if (!request) throw new ConvexError("Registration request not found.");
     if (["approved", "rejected", "active"].includes(request.status)) {
@@ -179,6 +188,8 @@ export const platformListRequests = query({
       _id: r._id,
       schoolName: r.schoolName,
       email: r.email,
+      contactName: r.contactName,
+      contactEmail: r.contactEmail,
       county: r.county ?? null,
       country: r.country ?? null,
       curriculum: r.curriculum ?? null,
@@ -211,7 +222,7 @@ export const platformRequestDetail = query({
         kind: d.kind,
         filename: file?.filename ?? "—",
         mimeType: file?.mimeType ?? "",
-        sizeBytes: file?.bytes?.length ?? 0,
+        sizeBytes: file?.bytes?.byteLength ?? 0,
         uploadedAt: d.uploadedAt,
       });
     }
@@ -393,21 +404,18 @@ export const approveRequest = mutation({
       createdBy: session.userId,
     });
 
-    // Contact person becomes the first school admin via an activation token
-    // (never a shared temp password — Phase 7 rule §12).
+    // Contact person becomes the first school admin via a one-time activation
+    // token (never a shared temp password — Phase 7 rule §12).
     let contactUserId: Id<"users"> | null = null;
     try {
-      const result = await ctx.runMutation(internal.phase7.invitations.ensureUserForInvitationInternal, {
+      const result = await createInvitationCore(ctx, {
+        session,
+        schoolId,
         email: r.contactEmail,
         name: r.contactName,
+        role: "school_admin",
       });
       contactUserId = result.userId;
-      await ctx.runMutation(internal.accounts.addMembershipInternal, {
-        userId: contactUserId,
-        schoolId,
-        role: "school_admin",
-        createdById: session.userId,
-      });
     } catch {
       // The wizard's Initial Users step can still provision the admin if the
       // contact email collides with an existing platform account.
@@ -461,7 +469,6 @@ export const activateRequestInternal = internalMutation({
 export const platformRequestStats = query({
   args: {},
   handler: async (ctx) => {
-    await getSession(ctx); // any signed-in caller; permission enforced below
     await requirePlatformSession(ctx);
     const rows = await ctx.db.query("schoolRequests").collect();
     const counts: Record<string, number> = {};

@@ -222,22 +222,20 @@ export default function Users() {
 function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   // Phase 7: users are INVITED — no temporary passwords. The invitation
   // produces a one-time activation link; the user sets their own password.
-  const inviteMutation = useMutation(api.phase7.invitations.invite);
+  const inviteMutation = useMutation(api.phase7.invitations.inviteUser);
   const [saving, setSaving] = useState(false);
-  const [link, setLink] = useState<string | null>(null);
+  const [code, setCode] = useState<string | null>(null);
   const [form, setForm] = useState({ name: "", email: "", role: "teacher" });
 
   const handleInvite = async () => {
     setSaving(true);
-    setLink(null);
+    setCode(null);
     try {
-      const invitationId = await inviteMutation({ email: form.email, name: form.name, role: form.role });
-      // Fetch the one-time link (admin copies it to the user — email provider
-      // is not configured, so in-app delivery is the channel).
+      const res = await inviteMutation({ email: form.email, name: form.name, role: form.role });
+      // Email delivery is queued server-side; when no provider is configured
+      // the one-time activation code is surfaced here for in-app handover.
+      setCode(res.token);
       toast.success("Invitation sent", { description: `${form.email} will set their own password.` });
-      onOpenChange(false);
-      setForm({ name: "", email: "", role: "teacher" });
-      void invitationId;
     } catch (err) {
       toast.error("Unable to send the invitation.", { description: err instanceof Error ? err.message : undefined });
     } finally {
@@ -274,8 +272,10 @@ function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
               </SelectContent>
             </Select>
           </div>
-          {link && (
-            <p className="rounded-md bg-muted/50 p-2 text-xs break-all">Activation link: {link}</p>
+          {code && (
+            <p className="rounded-md bg-muted/50 p-2 text-xs break-all">
+              One-time activation code (valid 7 days): <span className="font-mono font-semibold">{code}</span>
+            </p>
           )}
         </div>
         <DialogFooter>
