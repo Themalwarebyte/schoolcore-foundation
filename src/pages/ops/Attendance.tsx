@@ -250,7 +250,12 @@ function LessonRegisterForEntry({
         {ctx === undefined ? (
           <div className="h-40 animate-pulse rounded-lg bg-muted" />
         ) : rows.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">No students enrolled on this date.</p>
+          <div className="py-10 text-center">
+            <p className="text-sm font-medium">No students enrolled in this class</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Enroll students into this class first — then take the register here each morning.
+            </p>
+          </div>
         ) : (
           <div className="divide-y rounded-lg border">
             {rows.map((r) => (

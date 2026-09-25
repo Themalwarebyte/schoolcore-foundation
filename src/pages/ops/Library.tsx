@@ -121,7 +121,12 @@ function CatalogueSection({
                 </TableRow>
               ))}
             {books.length === 0 ? (
-              <TableRow><TableCell colSpan={5} className="text-center text-sm text-muted-foreground">No books catalogued yet.</TableCell></TableRow>
+              <TableRow>
+                  <TableCell colSpan={5} className="h-32 text-center">
+                    <p className="text-sm font-medium">No books catalogued yet</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Add titles to the catalogue to start issuing books to students.</p>
+                  </TableCell>
+                </TableRow>
             ) : null}
           </TableBody>
         </Table>
