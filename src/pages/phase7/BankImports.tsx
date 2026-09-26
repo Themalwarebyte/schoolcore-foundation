@@ -234,12 +234,13 @@ export default function BankImports() {
           </DialogHeader>
           <div className="grid gap-3">
             <div className="space-y-1">
-              <Label>Batch name *</Label>
-              <Input value={filename} onChange={(e) => setFilename(e.target.value)} placeholder="e.g. KCB June statement" />
+              <Label htmlFor="bi-name">Batch name *</Label>
+              <Input id="bi-name" value={filename} onChange={(e) => setFilename(e.target.value)} placeholder="e.g. KCB June statement" />
             </div>
             <div className="space-y-1">
-              <Label>CSV content *</Label>
+              <Label htmlFor="bi-csv">CSV content *</Label>
               <Textarea
+                id="bi-csv"
                 rows={8}
                 value={csv}
                 onChange={(e) => setCsv(e.target.value)}
@@ -248,8 +249,9 @@ export default function BankImports() {
               />
             </div>
             <div>
-              <Label className="text-xs text-muted-foreground">…or pick a .csv file</Label>
+              <Label htmlFor="bi-file" className="text-xs text-muted-foreground">…or pick a .csv file</Label>
               <Input
+                id="bi-file"
                 type="file"
                 accept=".csv,text/csv"
                 onChange={async (e) => {
@@ -260,6 +262,10 @@ export default function BankImports() {
                 }}
               />
             </div>
+            <p className="text-xs text-muted-foreground">
+              Accepted file: CSV (.csv) bank statement export, up to 500 rows per batch.
+              The first line must be the header <span className="font-mono">date,reference,amount,narration</span>.
+            </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setUploadOpen(false)}>Cancel</Button>
