@@ -15,6 +15,7 @@
 | [`docs/SERVER_DEPLOYMENT_GUIDE.md`](./SERVER_DEPLOYMENT_GUIDE.md) | Docker, reverse proxy, TLS, backups, monitoring, env setup on the server |
 | [`docs/SECRET_MANAGEMENT_GUIDE.md`](./SECRET_MANAGEMENT_GUIDE.md) | No secrets in GitHub; server-managed secrets; env-var inventory |
 | [`docs/EMAIL_RESEND_MIGRATION.md`](./EMAIL_RESEND_MIGRATION.md) | Email service audit, Resend abstraction plan, migration steps |
+| [`docs/MIGRATION_STATUS.md`](./MIGRATION_STATUS.md) | Live migration checklist — track progress from preparation to cutover |
 | [`scripts/README-migration.md`](../scripts/README-migration.md) | Migration tool documentation (export/import/validate/rollback scripts) |
 | [`docs/production-deployment.md`](./production-deployment.md) | Current deployment walkthrough (§3 env-var inventory is authoritative) |
 | [`docs/demo-accounts.md`](./demo-accounts.md) | Demo data & accounts reference |
