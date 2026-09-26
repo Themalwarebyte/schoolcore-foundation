@@ -4,7 +4,6 @@ import type { Id } from "./_generated/dataModel";
 import { requirePermission, getSchoolRecord, requireSchoolSession } from "./session";
 import { recordAudit } from "./audit";
 
-const ymd = (d: Date) => d.toISOString().slice(0, 10);
 
 /* ------------------------------------------------------------------ */
 /* Academic Years                                                      */

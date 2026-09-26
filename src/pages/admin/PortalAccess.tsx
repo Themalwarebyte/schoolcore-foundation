@@ -117,9 +117,7 @@ function RevokeButton({ linkId }: { linkId: string }) {
           await revoke({ linkId: linkId as never });
           toast.success("Portal access revoked");
         } catch (err) {
-          toast.error("Could not revoke access.", {
-            description: undefined,
-          });
+          toast.error("Could not revoke access.", { description: friendlyError(err) });
         } finally {
           setBusy(false);
         }
@@ -169,9 +167,7 @@ function InviteParentCard() {
             toast.success(`Parent account created for ${email}`);
             setOpen(false);
           } catch (err) {
-            toast.error("Could not create the parent account.", {
-              description: undefined,
-            });
+            toast.error("Could not create the parent account.", { description: friendlyError(err) });
           } finally {
             setBusy(false);
           }
@@ -220,9 +216,7 @@ function InviteStudentCard() {
             toast.success(`Student account created for ${email}`);
             setOpen(false);
           } catch (err) {
-            toast.error("Could not create the student account.", {
-              description: undefined,
-            });
+            toast.error("Could not create the student account.", { description: friendlyError(err) });
           } finally {
             setBusy(false);
           }

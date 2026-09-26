@@ -121,9 +121,7 @@ function RowActions({ id, status, title }: { id: string; status: string; title: 
               await publish({ announcementId: id as never });
               toast.success(`"${title}" published`);
             } catch (err) {
-              toast.error("Could not publish.", {
-                description: undefined,
-              });
+              toast.error("Could not publish.", { description: friendlyError(err) });
             }
           }}
         >
@@ -139,9 +137,7 @@ function RowActions({ id, status, title }: { id: string; status: string; title: 
               await archive({ announcementId: id as never });
               toast.success(`"${title}" archived`);
             } catch (err) {
-              toast.error("Could not archive.", {
-                description: undefined,
-              });
+              toast.error("Could not archive.", { description: friendlyError(err) });
             }
           }}
         >
@@ -185,9 +181,7 @@ function CreateDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v:
       reset();
       onOpenChange(false);
     } catch (err) {
-      toast.error("Could not save the announcement.", {
-        description: undefined,
-      });
+      toast.error("Could not save the announcement.", { description: friendlyError(err) });
     } finally {
       setBusy(false);
     }

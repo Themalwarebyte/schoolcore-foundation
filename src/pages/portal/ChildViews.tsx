@@ -1,12 +1,11 @@
-import { useParams, Link } from "react-router";
+import { useParams } from "react-router";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { PortalPageHeader, PortalSkeleton } from "@/components/layouts/portal-layout";
 import { AttendanceView, ResultsView, ReportCardsView, ReceiptDownloadButton } from "./shared";
+import { Clock, Receipt } from "lucide-react";
 import { formatDateTime } from "@/lib/status";
-import { Clock, FileEdit, Receipt } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
 /* Shared param guard                                                  */

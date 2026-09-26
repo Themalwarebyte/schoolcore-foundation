@@ -11,7 +11,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { BookOpen, BookCopy, Repeat, Plus } from "lucide-react";
-import { Pill, statusTone, FormDialog, Field, EmptyState, EntityPicker } from "@/components/ops/shared";
+import { Pill, statusTone, FormDialog, Field, EntityPicker } from "@/components/ops/shared";
 
 const money = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 

@@ -392,7 +392,6 @@ export const myPayslips = query({
     // (the query only ever returns slips tied to the caller's staff record;
     // payroll administration still requires payroll.view/payroll.manage).
     const session = await getSession(ctx);
-    const schoolId = session.schoolId as Id<"schools">;
     const ownStaff = await ctx.db
       .query("staff")
       .withIndex("by_user", (q) => q.eq("userId", session.userId))

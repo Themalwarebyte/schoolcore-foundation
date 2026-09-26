@@ -28,14 +28,6 @@ const REQUIRED_ENV: Record<string, string[]> = {
   gps: ["GPS_INGEST_SECRET"],
 };
 
-/** Non-secret fields shown in the UI per kind. */
-const DISPLAY_FIELDS: Record<string, string[]> = {
-  payments: ["MPESA_SHORTCODE"],
-  sms: ["SMS_SENDER_ID"],
-  email: ["EMAIL_FROM_ADDRESS"],
-  whatsapp: [],
-  gps: [],
-};
 
 export function providerConfigured(kind: string): boolean {
   const required = REQUIRED_ENV[kind] ?? [];

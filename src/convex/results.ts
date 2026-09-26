@@ -1,15 +1,14 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
-import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { mutation, query, type QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { requirePermission, getSchoolRecord } from "./session";
 import { recordAudit } from "./audit";
 import { notifyStudentCircle } from "./notify";
-import { computeSubjectResult, gradeFor, competitionRanks, type ScoreInput } from "./engines/results";
+import { computeSubjectResult, gradeFor, type ScoreInput } from "./engines/results";
 
 /** Accepts both query and mutation contexts (read-only usage). */
 type CtxLike = { db: QueryCtx["db"] };
-type MutationCtxLike = MutationCtx;
 
 /**
  * Compute the weighted result for every enrolled student in a class × subject ×

@@ -1,7 +1,6 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { internalMutation, query, QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
 
 /**
  * Get the current signed in user. Returns null if the user is not signed in.

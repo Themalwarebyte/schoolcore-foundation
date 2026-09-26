@@ -17,13 +17,10 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
-import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Plus, Search, MoreHorizontal, Power } from "lucide-react";
-import { roleLabel, type SessionRole } from "@/hooks/use-session";
+import { type SessionRole } from "@/hooks/use-session";
 
 const PAGE_SIZE = 15;
 
@@ -32,8 +29,6 @@ export default function PlatformSchools() {
   const [createOpen, setCreateOpen] = useState(false);
 
   const schools = useQuery(api.schools.listSchools, { search: search || undefined });
-
-  const setStatus = useMutation(api.schools.updateSchoolStatus);
 
   const rows = schools?.map((s) => ({
     _id: s._id,

@@ -27,12 +27,6 @@ type PreviewLine = {
   outcome: string;
 };
 
-const OUTCOME_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
-  promoted: "default",
-  repeated: "secondary",
-  transferred: "outline",
-  graduated: "secondary",
-};
 
 export default function Promotions() {
   const [fromYearId, setFromYearId] = useState("");

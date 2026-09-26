@@ -6,7 +6,6 @@ import { toast } from "sonner";
 import { friendlyError } from "@/lib/errors";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
 import { DataTable } from "@/components/shared/data-table";
-import { usePermissions } from "@/hooks/use-session";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,15 +22,12 @@ const PAGE_SIZE = 15;
 const RELATIONSHIPS = ["mother", "father", "guardian", "sibling", "grandparent", "aunt_uncle", "other"];
 
 export default function Guardians() {
-  const { can } = usePermissions();
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   const [addOpen, setAddOpen] = useState(false);
 
   // Debounce search without hooks-in-callback pitfalls.
-  const [searchTick, setSearchTick] = useState(0);
-  void searchTick;
   if (search !== debounced) {
     // Sets state during render only when input changed; schedules debounce.
     setTimeout(() => setDebounced(search), 300);

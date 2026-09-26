@@ -88,7 +88,6 @@ try {
   const actx = await accClient.query(anyApi.academics.academicContext, {});
   check("finance academic context resolves (year + term)", !!actx?.currentYear && !!actx?.currentTerm);
   const termId = actx?.currentTerm?._id as string | undefined;
-  const yearId = actx?.currentYear?._id as string | undefined;
 
   console.log("== 3. Fee structures ==");
   const structures = await accClient.query(anyApi.feeStructures.listStructures, {});
@@ -350,14 +349,4 @@ if (failures.length > 0) {
 }
 process.exit(fail > 0 ? 1 : 0);
 
-/** Small helper for one-off authenticated principal queries. */
-async function prClient(_api: unknown, tok: string | null, fn: { query: (c: unknown, args: unknown) => Promise<unknown> }, args: unknown) {
-  const c = new ConvexHttpClient(url);
-  try {
-    if (tok) c.setAuth(tok);
-    const value = await (fn as unknown as { query: (c: unknown, a: unknown) => Promise<unknown> }).query(c, args);
-    return { ok: value !== undefined, err: null as string | null };
-  } catch (err) {
-    return { ok: false, err: describeErr(err) };
-  } finally { c.close?.(); }
-}
+

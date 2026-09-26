@@ -25,7 +25,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Plus, Search, MoreHorizontal, Eye, Archive, Upload, Download, FileWarning } from "lucide-react";
+import { Plus, Search, MoreHorizontal, Eye, Archive, Upload } from "lucide-react";
 import { ImportStudentsDialog } from "@/components/shared/import-dialog";
 
 const PAGE_SIZE = 15;

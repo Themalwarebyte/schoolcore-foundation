@@ -76,8 +76,6 @@ async function validateStudentRows(
   // Load existing + in-file reference data once.
   const students = await ctx.db.query("students").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).collect();
   const existingAdmissions = new Set(students.map((s) => s.admissionNumber.toLowerCase()));
-  const guardians = await ctx.db.query("guardians").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).collect();
-  const guardianByPhone = new Map(guardians.map((g) => [g.phone ? normPhone(g.phone) : `id:${g._id}`, g]));
   const classes = await ctx.db.query("classSections").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).collect();
   const classLabels: Array<{ id: Id<"classSections">; label: string }> = [];
   for (const c of classes) {
@@ -86,7 +84,6 @@ async function validateStudentRows(
   }
 
   const seenAdmissions = new Map<string, number>();
-  const seenGuardianPhones = new Map<string, string>();
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
@@ -149,7 +146,6 @@ async function validateStaffRows(
   const valid: StaffRow[] = [];
   const staff = await ctx.db.query("staff").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).collect();
   const existing = new Set(staff.map((s) => s.employeeNumber.toLowerCase()));
-  const departments = await ctx.db.query("departments").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).collect();
   const seen = new Map<string, number>();
 
   for (let i = 0; i < rows.length; i++) {

@@ -7,7 +7,6 @@ import { friendlyError } from "@/lib/errors";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
 import { DataTable } from "@/components/shared/data-table";
 import { StatusBadge } from "@/lib/status";
-import { usePermissions } from "@/hooks/use-session";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,7 +21,6 @@ import { Plus, Search } from "lucide-react";
 const PAGE_SIZE = 15;
 
 export default function Staff() {
-  const { can } = usePermissions();
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");

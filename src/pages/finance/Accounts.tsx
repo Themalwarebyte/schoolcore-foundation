@@ -11,7 +11,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { ScopeBar, ClassSelect, YearSelect, TermSelect } from "@/components/ops/Controls";
 import { buildStatementPdf, downloadPdf } from "@/lib/financePdf";
 import { Search, Download } from "lucide-react";
 
@@ -34,7 +33,6 @@ export default function Accounts() {
   );
 
   const school = useQuery(api.schools.getMySchool, {});
-  const currentYear = useQuery(api.academics.academicContext, {});
 
   const downloadStatement = () => {
     if (!statement || !school) return;

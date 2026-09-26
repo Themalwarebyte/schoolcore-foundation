@@ -2,19 +2,18 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
-import { friendlyError } from "@/lib/errors";
+
 import { PageHeader, Can } from "@/components/layouts/school-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Users, Briefcase, CalendarClock, Building2, FileText, Check, X, Plus } from "lucide-react";
-import { StatCard, StatGrid, Pill, statusTone, FormDialog, Field } from "@/components/ops/shared";
+import { Pill, statusTone, FormDialog, Field } from "@/components/ops/shared";
 import { EntityPicker } from "@/components/ops/shared";
 
 type StaffRow = { id: string; label: string; sub?: string };

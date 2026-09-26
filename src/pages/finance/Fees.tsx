@@ -50,7 +50,6 @@ export default function Fees() {
   const [issueDate, setIssueDate] = useState("2026-01-10");
   const [dueDate, setDueDate] = useState("2026-02-10");
   const [dryRun, setDryRun] = useState(true);
-  const [preview, setPreview] = useState<{ pendingCount: number; perStudent: number; projectedTotal: number; alreadyBilledCount: number } | null>(null);
 
   const runBillingPreview = useQuery(
     api.feeStructures.billingPreview,
@@ -61,7 +60,6 @@ export default function Fees() {
 
   const openBilling = (s: { _id: string; name: string }) => {
     setBillingFor(s);
-    setPreview(null);
     setDryRun(true);
   };
 

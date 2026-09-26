@@ -121,17 +121,20 @@ export const confirmImport = mutation({
             continue;
           }
           // Classes have no single display name — match grade level + stream.
-          let classSectionId: Id<"classSections"> | undefined;
+          // (Class assignment is applied later via enrollments; resolution here
+          // validates that the referenced class exists in this school.)
           if (row.className) {
             const wanted = row.className.trim().toLowerCase();
+            let matched = false;
             for (const c of classes) {
               const grade = await ctx.db.get(c.gradeLevelId);
               const label = `${grade?.name ?? ""} ${c.streamName}`.trim().toLowerCase();
               if (label === wanted || c.streamName.toLowerCase() === wanted) {
-                classSectionId = c._id;
+                matched = true;
                 break;
               }
             }
+            if (!matched) throw new Error(`Class "${row.className}" not found`);
           }
           await ctx.db.insert("students", {
             schoolId,

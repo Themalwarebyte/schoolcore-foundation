@@ -1,7 +1,6 @@
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useNavigate, useParams } from "react-router";
-import { PageHeader } from "@/components/layouts/school-layout";
 import { StatusBadge } from "@/lib/status";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";

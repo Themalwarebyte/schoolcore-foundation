@@ -2,7 +2,6 @@ import { useState } from "react";
 import { NavLink, Navigate, Outlet, useNavigate } from "react-router";
 import { useSession, roleLabel } from "@/hooks/use-session";
 import { GlobalSearch } from "@/components/global-search";
-import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
