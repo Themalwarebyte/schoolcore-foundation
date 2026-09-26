@@ -57,6 +57,26 @@ deployment environment — **never committed to the repository**.
 | `PLATFORM_ADMIN_PASSWORD` | Required. Bootstrap **refuses** to create the platform admin without it — there is no default. |
 | `SEED_SECRET`             | Optional guard for the demo seed action. On production, prefer leaving it **unset** so the seed cannot run at all. |
 
+**Optional integrations** (all server-side; each feature degrades gracefully
+when unset — queues mark messages `failed: "… integration is not configured"`,
+M-Pesa actions return a null config instead of throwing):
+
+| Variable               | Enables                                                        |
+| ---------------------- | -------------------------------------------------------------- |
+| `MPESA_CONSUMER_KEY`   | M-Pesa (all four `MPESA_*` below required together)            |
+| `MPESA_CONSUMER_SECRET`| M-Pesa                                                        |
+| `MPESA_SHORTCODE`      | M-Pesa paybill/till                                            |
+| `MPESA_PASSKEY`        | M-Pesa STK push                                                |
+| `MPESA_CALLBACK_SECRET`| Shared secret for M-Pesa callback verification                 |
+| `MPESA_ENV`            | `sandbox` (default) or `production`                            |
+| `SMS_API_KEY`          | SMS channel of the communications module                       |
+| `EMAIL_API_KEY`        | Email channel of the communications module                     |
+| `WHATSAPP_API_KEY`     | WhatsApp channel of the communications module                  |
+| `VLY_EMAIL_OTP_API_KEY`| Email delivery for OTP invitations/activation                  |
+
+The platform integration key (`VLY_INTEGRATION_KEY`) is injected automatically
+by the platform — never set it by hand and never expose it to the client.
+
 Do **not** set Convex system variables by hand: `CONVEX_SITE_URL` (the
 deployment's `*.convex.site` HTTP-actions domain) and `CONVEX_DEPLOYMENT_NAME`
 are provided by Convex itself. `src/convex/auth.config.ts` reads

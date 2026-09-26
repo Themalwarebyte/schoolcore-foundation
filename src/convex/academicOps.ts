@@ -1,7 +1,7 @@
 import { ConvexError, v } from "convex/values";
 import { mutation, query, internalMutation } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
-import { requirePermission, getSchoolRecord } from "./session";
+import { requirePermission } from "./session";
 import { recordAudit } from "./audit";
 import { DAYS_OF_WEEK } from "./schema";
 import { todayInTz } from "./attendance";
@@ -414,7 +414,6 @@ export const analytics = query({
     const byClass = new Map<Id<"classSections">, number[]>();
     const bySubject = new Map<Id<"subjects">, number[]>();
     const gradeDistribution = new Map<string, number>();
-    let studentAverages = new Map<Id<"students">, number[]>();
     for (const r of results) {
       const c = byClass.get(r.classSectionId) ?? [];
       c.push(r.percentage);
@@ -423,12 +422,7 @@ export const analytics = query({
       s.push(r.percentage);
       bySubject.set(r.subjectId, s);
       if (r.gradeLabel) gradeDistribution.set(r.gradeLabel, (gradeDistribution.get(r.gradeLabel) ?? 0) + 1);
-      const st = studentAverages.get(r.studentId) ?? [];
-      st.push(r.percentage);
-      studentAverages.set(r.studentId, st);
     }
-    void studentAverages;
-    studentAverages = studentAverages;
 
     const avg = (xs: number[]) => (xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : null);
 

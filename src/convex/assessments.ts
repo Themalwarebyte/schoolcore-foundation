@@ -4,7 +4,6 @@ import type { Id } from "./_generated/dataModel";
 import { requirePermission, getSchoolRecord } from "./session";
 import { recordAudit } from "./audit";
 import { roleHasPermission, type Permission } from "./schema";
-import { ASSESSMENT_STATUSES, MARK_STATUSES } from "./schema";
 import { validDate } from "./attendance";
 
 type MutationCtxLike = MutationCtx;
