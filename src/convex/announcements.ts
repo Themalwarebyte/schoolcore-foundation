@@ -149,9 +149,8 @@ async function fanOutAnnouncement(
       .withIndex("by_class_section", (q) => q.eq("classSectionId", a.classSectionId!))
       .collect()
       .then((es) => es.filter((e) => e.status === "active"));
-    let count = 0;
     for (const e of enrollments) {
-      count += await notifyStudentCircle(ctx, schoolId, e.studentId, payload);
+      await notifyStudentCircle(ctx, schoolId, e.studentId, payload);
     }
     // Staff teaching that class get it too.
     const allocations = await ctx.db
@@ -174,7 +173,6 @@ async function fanOutAnnouncement(
         link: "/announcements",
         createdAt: Date.now(),
       });
-      count++;
     }
     void actorId;
     return;
@@ -185,21 +183,20 @@ async function fanOutAnnouncement(
       .withIndex("by_school", (q) => q.eq("schoolId", schoolId))
       .collect()
       .then((ss) => ss.filter((s) => s.gradeLevelId === a.gradeLevelId && s.status === "active"));
-    const enrollments = [];
-    for (const s of sections) {
-      enrollments.push(
-        ...(await ctx.db
-          .query("enrollments")
-          .withIndex("by_class_section", (q) => q.eq("classSectionId", s._id))
-          .collect()
-          .then((es) => es.filter((e) => e.status === "active"))),
-      );
-    }
-    let count = 0;
+    const enrollments = (
+      await Promise.all(
+        sections.map(async (s) =>
+          ctx.db
+            .query("enrollments")
+            .withIndex("by_class_section", (q) => q.eq("classSectionId", s._id))
+            .collect()
+            .then((es) => es.filter((e) => e.status === "active")),
+        ),
+      )
+    ).flat();
     for (const e of enrollments) {
-      count += await notifyStudentCircle(ctx, schoolId, e.studentId, payload);
+      await notifyStudentCircle(ctx, schoolId, e.studentId, payload);
     }
-    void count;
     return;
   }
   if (a.audience === "teachers") {

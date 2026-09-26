@@ -1,4 +1,4 @@
-import { ConvexError, v } from "convex/values";
+import { ConvexError } from "convex/values";
 import { query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { requirePermission } from "./session";

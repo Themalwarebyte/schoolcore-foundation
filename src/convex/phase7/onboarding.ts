@@ -24,7 +24,7 @@ export const getStatus = query({
     const session = await requirePermission(ctx, "onboarding.view", { schoolId });
     if (!session.schoolId) throw new ConvexError("Select a school to continue.");
     const sid = session.schoolId;
-    let record = await ctx.db
+    const record = await ctx.db
       .query("onboardingRecords")
       .withIndex("by_school", (q) => q.eq("schoolId", sid))
       .first();

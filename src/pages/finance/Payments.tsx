@@ -115,7 +115,7 @@ export default function Payments() {
     setReceiptTarget(paymentId);
     // The query resolves asynchronously; wait a tick for the reactive result.
     for (let i = 0; i < 50; i++) {
-      // eslint-disable-next-line no-await-in-loop
+       
       await new Promise((r) => setTimeout(r, 100));
       if (detail && (detail as { payment?: { _id?: string } }).payment?._id === paymentId) return detail;
       if (detail === null) return null;
