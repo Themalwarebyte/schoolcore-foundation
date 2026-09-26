@@ -3,6 +3,13 @@
 > **Status:** PREPARATION. This guide describes the **target** self-hosted
 > server procedure. It has not been executed; the current Freebuff deployment
 > remains live and untouched (**OWNER DECISION REQUIRED** for execution).
+>
+> **Confirmed:** ingress is a **Cloudflare Tunnel** — outbound `cloudflared`
+> connector, TLS at the Cloudflare edge, WebSockets enabled, no inbound web
+> ports, no origin reverse proxy. Hostnames: `schoolcore.ooflowdesk.com` /
+> `schoolcore-api.ooflowdesk.com` / `schoolcore-dashboard.ooflowdesk.com`
+> (dashboard behind Cloudflare Access). Initial server: **gman-02**.
+> Host-specific runbook: SELF_HOST_EXECUTION_CHECKLIST.md.
 
 ---
 
@@ -10,8 +17,10 @@
 
 - One Linux VM (Ubuntu 22.04+ LTS recommended) with Docker Engine 24+ and
   Docker Compose v2. Sizing: SELF_HOSTING_GUIDE §4.
-- DNS records for the public hostnames (app + backend/dashboard).
-- Outbound HTTPS for integrations (Resend, M-Pesa, SMS provider).
+- Cloudflare DNS zone with proxied records for the confirmed public
+  hostnames, routed via the Cloudflare Tunnel (§4) — no inbound web ports.
+- Outbound HTTPS for integrations (Resend, M-Pesa, SMS provider) and for the
+  cloudflared tunnel connector.
 - Repo access on a workstation (never build on the VM — see OOM note in
   SELF_HOSTING_GUIDE §4 sizing notes).
 
@@ -28,10 +37,18 @@ PLAN (data cutover), EMAIL_RESEND_MIGRATION (email), scripts/README-migration
 curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker schoolcore   # dedicated service user, no sudo for app ops
 
-# Firewall: only what is needed
+# Firewall: only what is needed — NO inbound web ports; ingress is the
+# Cloudflare Tunnel (outbound-only cloudflared connector).
 sudo ufw allow 22/tcp        # ssh (restrict source IP if possible)
-sudo ufw allow 80,443/tcp
 sudo ufw enable
+
+# Cloudflare Tunnel connector (confirmed). Install cloudflared and authorize
+# it with the tunnel token from the Cloudflare Zero Trust dashboard. The
+# token is a secret: keep it in /etc/schoolcore/schoolcore.env (compose
+# `tunnel` service) or run cloudflared as a host service — never in the repo.
+# curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+#   -o /usr/local/bin/cloudflared && sudo chmod +x /usr/local/bin/cloudflared
+# sudo cloudflared service install <TUNNEL_TOKEN>
 
 # Create persistent data layout
 sudo mkdir -p /var/lib/schoolcore/{convex,backups}
@@ -51,7 +68,7 @@ sudoedit /etc/schoolcore/schoolcore.env   # SECRET_MANAGEMENT_GUIDE §4
 | Convex backend | official self-hosted backend image (see [Convex self-hosting docs](https://docs.convex.dev/production/hosting/self-hosting)) | Provides functions runtime, DB, and file storage; pin a version |
 | Convex dashboard | companion dashboard image (same docs) | Admin UI for the self-hosted backend |
 | App (SPA) | built from repo `Dockerfile` (below) | nginx serving `dist/` |
-| Reverse proxy | Caddy (recommended: automatic TLS) or Traefik/Nginx | TLS termination |
+| Tunnel connector | cloudflared (host service or `cloudflare/cloudflared` container) | Outbound-only link to Cloudflare; TLS terminates at the edge — no origin proxy, no origin certs |
 
 ### 3.2 App Dockerfile (proposed, `deploy/Dockerfile`)
 
@@ -89,14 +106,13 @@ services:
   dashboard:
     image: convex/convex-dashboard:<pinned>
     restart: unless-stopped
-  proxy:
-    image: caddy:2-alpine
+  tunnel:
+    image: cloudflare/cloudflared:<pinned>
     restart: unless-stopped
-    ports: ["80:80", "443:443"]
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
-      - caddy_data:/data
-volumes: { caddy_data: {} }
+    env_file: /etc/schoolcore/schoolcore.env   # provides TUNNEL_TOKEN
+    command: tunnel --no-autoupdate run
+    # Outbound-only connector — no published ports. Ingress rules + TLS live
+    # at the Cloudflare edge; TUNNEL_TOKEN is a secret (never in the repo).
 ```
 
 > Exact env/args for the official backend image (ports, admin key, instance
@@ -105,46 +121,51 @@ volumes: { caddy_data: {} }
 
 ---
 
-## 4. Reverse proxy & TLS
+## 4. Ingress & TLS: Cloudflare Tunnel (confirmed)
 
 ### 4.1 Routes
 
-| Hostname | Upstream | Notes |
+| Hostname (confirmed) | Upstream (tunnel service URL) | Notes |
 | --- | --- | --- |
-| `app.schoolcore.example` | `app:80` (nginx) | SPA; WebSocket upgrade for Convex client passes to backend host |
-| `api.schoolcore.example` | `convex:32100` (backend HTTP) | Convex HTTP actions + client WebSocket |
-| `dash.schoolcore.example` | `dashboard:port` | Admin dashboard — IP-allowlist or SSO-gate this |
+| `schoolcore.ooflowdesk.com` | `http://app:80` (nginx) | SPA; WebSockets enabled at the edge |
+| `schoolcore-api.ooflowdesk.com` | `http://convex:32100` (backend HTTP) | Convex HTTP actions + client WebSocket |
+| `schoolcore-dashboard.ooflowdesk.com` | `http://dashboard:<port>` | Admin dashboard — protected by Cloudflare Access (confirmed) |
 
 Convex's browser client connects to `VITE_CONVEX_URL`; for self-host this
-points at the public backend hostname. The SPA does not need to know the
-app/API split — set `VITE_CONVEX_URL=https://api.…` at build time.
+points at the public backend hostname — set
+`VITE_CONVEX_URL=https://schoolcore-api.ooflowdesk.com` at build time. The
+SPA does not need to know the app/API split.
 
-### 4.2 Caddyfile (proposed)
+> **Caution:** check what `schoolcore.ooflowdesk.com` currently serves before
+> cutover — pointing the confirmed production hostnames at gman-02 happens
+> only in the cutover step (SELF_HOST_EXECUTION_CHECKLIST §7.3), never during
+> bring-up.
 
-```caddy
-app.schoolcore.example {
-  encode gzip
-  root * /srv/app        # proxy to app container per compose network
-  reverse_proxy app:80
-}
+### 4.2 Tunnel ingress config (proposed)
 
-api.schoolcore.example {
-  reverse_proxy convex:32100
-}
+Hostnames can be managed in the Cloudflare Zero Trust dashboard (public
+hostnames on the tunnel) or via a local config file:
 
-dash.schoolcore.example {
-  reverse_proxy dashboard:<port>
-  # @blocked not allowlisted -> respond 403  (add at execution time)
-}
+```yaml
+# cloudflared ingress (hostnames → compose-network service URLs)
+ingress:
+  - hostname: schoolcore.ooflowdesk.com
+    service: http://app:80
+  - hostname: schoolcore-api.ooflowdesk.com
+    service: http://convex:32100
+  - hostname: schoolcore-dashboard.ooflowdesk.com
+    service: http://dashboard:<port>
+  - service: http_status:404
 ```
 
-### 4.3 TLS
+### 4.3 TLS (Cloudflare edge — confirmed)
 
-- Caddy issues/renews certificates automatically (ACME/HTTP-01) — no manual
-  cert handling; store nothing sensitive in the repo.
-- If Traefik/Nginx preferred, use certbot + a volume for certs; renewals via
-  systemd timer.
-- HSTS recommended once TLS confirmed stable.
+- TLS terminates at the Cloudflare edge — no origin certificates, no ACME/
+  certbot, no cert renewals on the server; nothing sensitive in the repo.
+- WebSockets are enabled at the edge (required by the Convex client).
+- Dashboard access is gated by a Cloudflare Access application + policy.
+- Optional hardening at execution time: authenticated origin pulls (mTLS
+  between Cloudflare and origin), HSTS + WAF rules managed in Cloudflare.
 
 ### 4.4 Nginx SPA config (inside app image)
 
@@ -187,10 +208,11 @@ restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune
 | --- | --- | --- |
 | Host | node_exporter + Prometheus/Grafana, or a hosted agent | CPU/RAM/disk (data volume > 80% alert), load |
 | Containers | `docker events`/healthchecks; cAdvisor | restart loops, OOM kills |
-| App | uptime monitor hitting `https://app…` (status page service) | HTTP 200, TLS expiry |
+| Tunnel | Cloudflare Zero Trust dashboard / `cloudflared tunnel info` | connector online, edge↔origin health |
+| App | uptime monitor hitting `https://schoolcore.ooflowdesk.com` (status page service) | HTTP 200 |
 | Backend | uptime probe of the backend HTTP endpoint; Convex dashboard health | function errors visible in dashboard logs |
 | Logs | journald + `docker logs` rotation; optional Loki | error rate spikes |
-| Alerts | e-mail via Resend (post-migration) or SMS | disk, service down, TLS expiry < 14 days |
+| Alerts | e-mail via Resend (post-migration) or SMS | disk, service down, tunnel connector down |
 
 Minimum viable monitoring if no stack is desired: a hosted uptime probe +
 `systemd` restart policies + a daily disk-usage cron that emails via Resend.
@@ -200,7 +222,8 @@ Minimum viable monitoring if no stack is desired: a hosted uptime probe +
 ## 7. Environment setup on the server
 
 1. Secrets file: `/etc/schoolcore/schoolcore.env` (SECRET_MANAGEMENT_GUIDE §4)
-   — root:root 0600, listed variables only, `SEED_SECRET` deliberately absent.
+   — root:root 0600, listed variables only, `SEED_SECRET` deliberately absent,
+   `TUNNEL_TOKEN` included (Cloudflare tunnel credential — a secret).
 2. Compose references it via `env_file:` — values enter containers as plain
    environment variables at start; no dotenvx involved at any layer.
 3. Build-time (`VITE_CONVEX_URL`) is passed to `docker build` as a build arg
@@ -220,7 +243,9 @@ bun tsc -b --noEmit && bun run build     # gates + static build
 docker compose -f deploy/compose.yaml build app
 # On server:
 docker compose -f deploy/compose.yaml pull
-docker compose -f deploy/compose.yaml up -d
+docker compose -f deploy/compose.yaml up -d   # includes the cloudflared tunnel connector
+# Create the tunnel + map public hostnames in Cloudflare (§4.2). Do NOT point
+# the confirmed production hostnames at gman-02 until cutover (checklist §7.3).
 # Push schema/functions to the self-hosted backend:
 bunx convex push   # pointed at the self-hosted deployment per CLI docs
 # Then data import + validation per CONVEX_SELF_HOST_MIGRATION_PLAN §4–5.
@@ -231,11 +256,13 @@ bunx convex push   # pointed at the self-hosted deployment per CLI docs
 ## 9. Security hardening checklist
 
 - [ ] SSH: key-only, no root login, fail2ban
-- [ ] `ufw` default-deny incoming; only 22/80/443
-- [ ] Dashboard hostname IP-allowlisted (not public)
+- [ ] `ufw` default-deny incoming; only 22 (no inbound web ports — the
+      tunnel is outbound-only)
+- [ ] Dashboard hostname protected by Cloudflare Access (confirmed)
 - [ ] Env file 0600 root:root; never world-readable
 - [ ] Docker: no unnecessary `--privileged`; containers non-root where
       supported
 - [ ] Automatic security updates (`unattended-upgrades`) for the OS
 - [ ] Backup target access-restricted + encrypted
-- [ ] TLS: ACME auto-renew verified; HSTS after stability
+- [ ] TLS at the Cloudflare edge (no origin certs); HSTS/WAF rules managed in
+      Cloudflare; tunnel health monitored (§6)

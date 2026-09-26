@@ -22,7 +22,9 @@
 | --- | --- |
 | Target domain | `https://schoolcore.ooflowdesk.com` |
 | Initial server | `gman-02` |
-| Portability | Migration to a future server = deployment restore + DNS change only (§8) |
+| Portability | Future server migration = restore deployment state + restore secrets + change Cloudflare routing only (§8) |
+| Public ingress | **Cloudflare Tunnel** — outbound `cloudflared` connector on `gman-02`; no inbound web ports |
+| Dashboard protection | **Cloudflare Access** (edge SSO/allowlist) |
 | Convex backend | Self-hosted Convex (official image, version-pinned) |
 | Application backend | **No rewrite** — existing Convex functions pushed as-is |
 | Secrets | Server-managed env config (`/etc/schoolcore/schoolcore.env`) — **no dotenvx** |
@@ -35,12 +37,11 @@
 | --- | --- | --- |
 | `schoolcore.ooflowdesk.com` | Public app (SPA) | `app` container (nginx serving `dist/`) |
 | `schoolcore-api.ooflowdesk.com` | Convex backend HTTP + WebSocket (`VITE_CONVEX_URL`) | `convex` container |
-| `schoolcore-dash.ooflowdesk.com` | Convex dashboard (admin) — IP-allowlisted | `dashboard` container |
+| `schoolcore-dashboard.ooflowdesk.com` | Convex dashboard (admin) — **Cloudflare Access**-protected | `dashboard` container via `cloudflared` |
 
-> If the Owner prefers a single certificate footprint, the API/dashboard
-> hostnames can instead be path-routed under the main domain — but WebSocket
-> + cookie scoping make **separate hostnames the recommended default**. Any
-> deviation: **OWNER DECISION REQUIRED** before §2.
+> **Ingress confirmed:** Cloudflare Tunnel. `cloudflared` connects **outbound**
+> to Cloudflare; TLS terminates at the edge; ports 80/443 stay closed on
+> `gman-02`. WebSockets must be enabled in Cloudflare (Convex client).
 
 ---
 
@@ -82,7 +83,7 @@ Reference: [`MIGRATION_STATUS.md`](./MIGRATION_STATUS.md) §1 · [`SECRET_MANAGE
 - [ ] `gman-02` provisioned: Ubuntu 22.04+ LTS, sizing per SELF_HOSTING_GUIDE §4 (4+ vCPU / 8–16 GB / 100 GB+ SSD for multi-school production).
 - [ ] SSH: key-only, no root login, fail2ban; `schoolcore` service user created.
 - [ ] Unattended security upgrades enabled.
-- [ ] Disk, RAM, and outbound HTTPS (Resend, M-Pesa, SMS) verified.
+- [ ] Disk, RAM, and outbound HTTPS (Resend, M-Pesa, SMS, Cloudflare Tunnel connector) verified.
 - [ ] Clock sync (NTP) verified — timestamps matter for auth + audit logs.
 
 ---
@@ -101,24 +102,26 @@ Reference: [`SERVER_DEPLOYMENT_GUIDE.md`](./SERVER_DEPLOYMENT_GUIDE.md) §2–§
 - [ ] `/var/lib/schoolcore/backups` — staging for local backup snapshots.
 - [ ] `/etc/schoolcore/` — secrets dir, `root:root 0700`.
 
-### 2.3 Firewall
-- [ ] `ufw` default-deny incoming; allow 22/80/443 only.
-- [ ] Dashboard hostname additionally IP-allowlisted at the proxy (not `ufw`, so TLS still terminates).
+### 2.3 Firewall & ingress
+- [ ] `ufw` default-deny incoming; allow 22 (SSH) only — **no inbound 80/443** (Cloudflare Tunnel connects outbound).
+- [ ] `cloudflared` installed (container or systemd service) and authenticated to the `schoolcore` tunnel — token/credentials stored server-side only.
+- [ ] Tunnel public-hostname routes configured for all three hostnames (§2.6).
+- [ ] **Cloudflare Access** application protecting the dashboard hostname.
 
 ### 2.4 TLS
-- [ ] ACME certificates issuing for all three hostnames (Caddy recommended — automatic).
-- [ ] Auto-renew verified (forced renewal dry-run or expiry probe).
+- [ ] Edge certificates active for all three hostnames (Cloudflare-managed; nothing to renew on the origin).
+- [ ] Always-HTTPS enforced; **WebSockets enabled** (Convex client requirement).
 - [ ] HSTS enabled after stability window.
 
-### 2.5 Reverse proxy
-- [ ] Proxy routes per hostname table above; WebSocket upgrade configured for the API host (Convex client).
-- [ ] SPA fallback (`try_files … /index.html`) on the app host.
-- [ ] Gzip/brotli enabled; request size limits sane (file uploads via Convex storage).
+### 2.5 Local routing (behind the tunnel)
+- [ ] `cloudflared` routes each public hostname to its local service (`app` / `convex` / `dashboard`); a local reverse proxy is optional.
+- [ ] SPA fallback (`try_files … /index.html`) on the app container.
+- [ ] Compression and request-size limits sane (file uploads via Convex storage).
 
-### 2.6 Domain configuration
-- [ ] DNS A/AAAA records created for the three hostnames → `gman-02` IP.
-- [ ] **TTL pre-lowered** (e.g. 300s) at least 48 h before §7 — makes the cutover DNS switch fast and reversible.
-- [ ] DNSSEC/security posture reviewed with the `ooflowdesk.com` zone operator.
+### 2.6 Domain configuration (Cloudflare)
+- [ ] `ooflowdesk.com` zone on Cloudflare; the three hostnames created as **proxied CNAMEs to the tunnel** (`<tunnel-id>.cfargotunnel.com`).
+- [ ] Confirm what `schoolcore.ooflowdesk.com` serves before cutover — it must either point at the current deployment or be unpublished; the production switch happens only in §7.3.
+- [ ] Routing changes are near-instant (no TTL dependency) — both the cutover switch and rollback are fast.
 
 ---
 
@@ -137,6 +140,7 @@ Reference: SERVER_DEPLOYMENT_GUIDE §3/§8 · CONVEX_SELF_HOST_MIGRATION_PLAN §
 - [ ] Optional integrations as needed: `MPESA_*`, `SMS_API_KEY`, `WHATSAPP_API_KEY` — all degrade gracefully if absent.
 - [ ] `SEED_SECRET` confirmed **absent**; no `VLY_*` keys provisioned (sunset).
 - [ ] No dotenvx anywhere — plain env vars only.
+- [ ] Cloudflare Tunnel token/credentials held server-side only (never committed, never `VITE_*`).
 
 ### 3.3 Database / storage
 - [ ] Convex data volume persists across container restart (test: restart backend, data intact).
@@ -149,7 +153,7 @@ Reference: SERVER_DEPLOYMENT_GUIDE §3/§8 · CONVEX_SELF_HOST_MIGRATION_PLAN §
 ### 3.5 Verification
 - [ ] `bunx convex push` from the tagged SHA creates all **125 tables + 315 indexes** (schema = `src/convex/schema.ts` + `schemaPhase7.ts`; no backend rewrite).
 - [ ] Pushed SHA recorded in the migration manifest (schema-parity gate).
-- [ ] Backend HTTP endpoint answers on `https://schoolcore-api…`; dashboard reachable (allowlisted only).
+- [ ] Backend HTTP endpoint answers on `https://schoolcore-api.ooflowdesk.com` through the tunnel; dashboard reachable **through Cloudflare Access only**.
 
 ---
 
@@ -239,13 +243,14 @@ Reference: CONVEX_SELF_HOST_MIGRATION_PLAN §6 · G4 gate: full rehearsal + §5.
 - [ ] Import into production self-host (empty target confirmed); structural validation green **before any DNS change**.
 - [ ] Functional suites green on production target.
 
-### 7.3 DNS switch
-- [ ] Point `schoolcore.ooflowdesk.com` (+ API/dashboard hostnames) at `gman-02` (TTL already low, §2.6).
+### 7.3 Cloudflare routing switch
+- [ ] Re-route the three public hostnames to the `gman-02` tunnel (§2.6) — instant and instantly reversible.
 - [ ] Post-switch smoke: sign-in, attendance mark, invoice create, announcement, report-card view.
 - [ ] Unfreeze; hyper-care monitoring begins; freeze end timestamp recorded.
 
 ### 7.4 Monitoring
-- [ ] Uptime probes green: app + API endpoints; dashboard allowlisted access.
+- [ ] Uptime probes green: app + API endpoints; dashboard via Cloudflare Access.
+- [ ] Tunnel connector health green (alert if `cloudflared` disconnects).
 - [ ] Error-rate watch (backend logs/dashboard) for the first 48 h.
 - [ ] Disk, container-restart, TLS-expiry alerts active (§1.3/§2 tooling).
 - [ ] M-Pesa callbacks received during freeze reconciled; SMS/email queues drained.
@@ -255,7 +260,7 @@ Reference: CONVEX_SELF_HOST_MIGRATION_PLAN §6 · G4 gate: full rehearsal + §5.
 
 ## 8. Future server migration procedure
 
-> Portability contract: because the deployment is Docker Compose + version-pinned images + volume data + env file, migrating `gman-02` → `newhost` is **deployment restoration + DNS change only**. No application changes, no data transformation.
+> Portability contract (confirmed): migrating `gman-02` → `newhost` requires only **(1) restoring deployment state, (2) restoring secrets, (3) changing Cloudflare routing**. No application changes, no data transformation, no certificate work.
 
 ### 8.1 Prepare new host
 1. Provision `newhost` (§1.4 baseline), install Docker/Compose (§2.1).
@@ -267,7 +272,7 @@ Reference: CONVEX_SELF_HOST_MIGRATION_PLAN §6 · G4 gate: full rehearsal + §5.
 5. Start the stack; run `scripts/migration/validate.mjs` + functional suites against `newhost`'s API URL (staging hostname or local override first).
 
 ### 8.3 Switch over
-6. Pre-lower DNS TTL 48 h in advance; update A/AAAA records for the three hostnames → `newhost`.
+6. Authorize a `cloudflared` connector for `newhost` (same tunnel) and re-point the three public hostnames' routing to it — instant, no DNS TTL involved.
 7. Post-switch smoke (§7.3 list); monitor; decommission `gman-02` after the grace period.
 
 ### 8.4 Portability checklist (what makes this possible — keep true)
@@ -277,7 +282,9 @@ Reference: CONVEX_SELF_HOST_MIGRATION_PLAN §6 · G4 gate: full rehearsal + §5.
 - [ ] Secrets fully external to images (`env_file`); re-creatable from the secret store.
 - [ ] `VITE_CONVEX_URL` hostname stable (same domain after migration) or rebuild one image with the new API URL.
 - [ ] Backups restorable to any Docker-capable host (documented restore command, tested).
-- [ ] TLS is ACME (re-issued on new host automatically) — no cert files to move.
+- [ ] TLS terminates at Cloudflare's edge — no cert files to move.
+- [ ] Cloudflare routing is the only traffic switch (tunnel hostnames re-pointed; instant).
+- [ ] `cloudflared` credentials treated as secrets — new host's connector authorized from the secret store.
 
 ---
 
@@ -286,3 +293,4 @@ Reference: CONVEX_SELF_HOST_MIGRATION_PLAN §6 · G4 gate: full rehearsal + §5.
 | Date | Change |
 | --- | --- |
 | 2026-09-26 | Checklist created from confirmed Owner decisions (domain, gman-02, portability, self-hosted Convex, no backend rewrite, server-managed secrets, Resend, Cloud untouched until cutover). Nothing executed. |
+| 2026-09-26 | Ingress confirmed: Cloudflare Tunnel + Cloudflare Access; dashboard hostname `schoolcore-dashboard.ooflowdesk.com`; portability contract = restore state + secrets + Cloudflare routing. |

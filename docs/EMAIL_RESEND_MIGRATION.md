@@ -65,7 +65,7 @@ stays as-is.
 | --- | --- | --- |
 | `RESEND_API_KEY` | **future** — not read by code yet | Enables Resend as the email provider (OTP + comm queue). Format: `re_…`; **never committed**. |
 | `EMAIL_API_KEY` | current | Legacy email channel gate on Convex Cloud (kept working; removed at cutover if Owner agrees) |
-| `VLY_EMAIL_OTP_API_KEY` | current | Legacy OTP gateway; fallback until Resend verified |
+| `VLY_EMAIL_OTP_API_KEY` | current | Legacy OTP gateway; fallback until Resend verified — **retirement at cutover CONFIRMED** |
 
 Add `RESEND_API_KEY=<blank>` to the self-hosted env template when Phase 4
 starts (SECRET_MANAGEMENT_GUIDE §4 documents it already). No `.env.example`
@@ -96,7 +96,8 @@ edit: add `RESEND_API_KEY=` with no value under a comment.
 4. **Verify comm queue:** send a test email-channel bulk job; confirm
    `commMessages.status` transitions queued → sent with a real provider id.
 5. **Set `RESEND_API_KEY` on self-host** during Phase 4 of the self-host
-   rollout; remove VLY OTP fallback at cutover.
+   rollout; retire the VLY OTP fallback at cutover (**confirmed** —
+   `VLY_EMAIL_OTP_API_KEY` provider is retired during migration).
 6. **Update docs** (`production-deployment.md` §3 table: add `RESEND_API_KEY`;
    mark `VLY_EMAIL_OTP_API_KEY` as sunset) at implementation time.
 
