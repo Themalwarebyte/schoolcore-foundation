@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -213,7 +214,7 @@ function IssueForm({
             setBorrower(null);
             toast.success("Book issued");
           } catch (e) {
-            toast.error(e instanceof Error ? e.message : "Could not issue book");
+            toast.error(friendlyError(e, "Could not issue book"));
           }
         }}
       >

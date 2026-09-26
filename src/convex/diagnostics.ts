@@ -1,4 +1,5 @@
-import { action, internalQuery, query, internalMutation } from "./_generated/server";
+import { action, internalQuery, query, internalMutation, type MutationCtx } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 
@@ -70,6 +71,9 @@ export const runInternal = action({
   handler: async (ctx, { name }): Promise<unknown> => {
     if (name === "purgeSmokeEnrollments") {
       return await ctx.runMutation(internal.diagnostics.purgeSmokeEnrollments, {});
+    }
+    if (name === "purgeSmokeAssessments") {
+      return await ctx.runMutation(internal.diagnostics.purgeSmokeAssessments, {});
     }
     if (name === "reopenSmokeSubjectResults") {
       return await ctx.runMutation(internal.diagnostics.reopenSmokeSubjectResults, {});
@@ -643,12 +647,52 @@ export const auditCensusInternal = internalQuery({
  * the results completeness gate). Matches only harness-created students:
  * SMOKE-prefixed admission numbers or the harness's distinctive first names.
  */
+/** Shared dependent-row cleanup for one harness-created student. */
+async function purgeStudentDependents(ctx: MutationCtx, st: { _id: Id<"students"> }) {
+  let scoresRemoved = 0;
+  let recipientsRemoved = 0;
+  let enrollmentsRemoved = 0;
+  let guardiansRemoved = 0;
+  const studentId = st._id;
+  for (const sc of await ctx.db
+    .query("assessmentScores")
+    .withIndex("by_student", (q) => q.eq("studentId", studentId))
+    .collect()) {
+    await ctx.db.delete(sc._id);
+    scoresRemoved++;
+  }
+  for (const rec of await ctx.db
+    .query("assignmentRecipients")
+    .withIndex("by_student", (q) => q.eq("studentId", studentId))
+    .collect()) {
+    await ctx.db.delete(rec._id);
+    recipientsRemoved++;
+  }
+  for (const en of await ctx.db
+    .query("enrollments")
+    .withIndex("by_student", (q) => q.eq("studentId", studentId))
+    .collect()) {
+    await ctx.db.delete(en._id);
+    enrollmentsRemoved++;
+  }
+  for (const gl of await ctx.db
+    .query("guardianStudents")
+    .withIndex("by_student", (q) => q.eq("studentId", studentId))
+    .collect()) {
+    await ctx.db.delete(gl._id);
+    guardiansRemoved++;
+  }
+  await ctx.db.delete(studentId);
+  return { scoresRemoved, recipientsRemoved, enrollmentsRemoved, guardiansRemoved };
+}
+
 export const purgeSmokeEnrollments = internalMutation({
   args: {},
   handler: async (ctx) => {
     const students = (await ctx.db.query("students").collect()).filter(
       (s) =>
-        s.admissionNumber.startsWith("SMOKE-") ||
+        s.admissionNumber.startsWith("SMOKE") ||
+        (s.firstName ?? "").toUpperCase().startsWith("SMOKE") ||
         s.firstName === "PhaseTwo" ||
         s.firstName === "LateJoin",
     );
@@ -657,36 +701,11 @@ export const purgeSmokeEnrollments = internalMutation({
     let recipientsRemoved = 0;
     let guardiansRemoved = 0;
     for (const st of students) {
-      for (const sc of await ctx.db
-        .query("assessmentScores")
-        .withIndex("by_student", (q) => q.eq("studentId", st._id))
-        .collect()) {
-        await ctx.db.delete(sc._id);
-        scoresRemoved++;
-      }
-      for (const rec of await ctx.db
-        .query("assignmentRecipients")
-        .withIndex("by_student", (q) => q.eq("studentId", st._id))
-        .collect()) {
-        await ctx.db.delete(rec._id);
-        recipientsRemoved++;
-      }
-      for (const en of await ctx.db
-        .query("enrollments")
-        .withIndex("by_student", (q) => q.eq("studentId", st._id))
-        .collect()) {
-        await ctx.db.delete(en._id);
-        enrollmentsRemoved++;
-      }
-      // Guardian links pointing at this student.
-      for (const gl of await ctx.db
-        .query("guardianStudents")
-        .withIndex("by_student", (q) => q.eq("studentId", st._id))
-        .collect()) {
-        await ctx.db.delete(gl._id);
-        guardiansRemoved++;
-      }
-      await ctx.db.delete(st._id);
+      const r = await purgeStudentDependents(ctx, st);
+      enrollmentsRemoved += r.enrollmentsRemoved;
+      scoresRemoved += r.scoresRemoved;
+      recipientsRemoved += r.recipientsRemoved;
+      guardiansRemoved += r.guardiansRemoved;
     }
     return { studentsRemoved: students.length, enrollmentsRemoved, scoresRemoved, recipientsRemoved, guardiansRemoved };
   },
@@ -712,6 +731,56 @@ export const reopenSmokeSubjectResults = internalMutation({
       }
     }
     return { cleared };
+  },
+});
+
+/**
+ * Internal: remove harness-created SMOKE-prefixed assessments (e.g. repeated
+ * "SMOKE P2 Workflow …" runs) along with their assessment scores, and students
+ * converted from harness SMOKE admission applications. Old locked SMOKE
+ * assessments and converted application students otherwise leave permanent
+ * mark holes for seeded students, which wrongly blocks the results
+ * completeness gate on every rerun. Only SMOKE/harness artifacts are touched.
+ */
+export const purgeSmokeAssessments = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const assessments = (await ctx.db.query("assessments").collect()).filter(
+      (a) => a.title.startsWith("SMOKE"),
+    );
+    let scoresRemoved = 0;
+    for (const a of assessments) {
+      for (const sc of await ctx.db
+        .query("assessmentScores")
+        .withIndex("by_assessment", (q) => q.eq("assessmentId", a._id))
+        .collect()) {
+        await ctx.db.delete(sc._id);
+        scoresRemoved++;
+      }
+      await ctx.db.delete(a._id);
+    }
+
+    // Harness admission applications (lastName "Smoke<run>" / "Convert<run>")
+    // and any students converted from them (they enroll with today's date and
+    // permanently block the results completeness gate otherwise).
+    const apps = (await ctx.db.query("applications").collect()).filter(
+      (ap) =>
+        /^(Smoke|Convert)[a-z0-9]*$/i.test(ap.lastName ?? "") ||
+        (ap.firstName ?? "").toUpperCase().startsWith("SMOKE"),
+    );
+    let studentsRemoved = 0;
+    for (const ap of apps) {
+      if (ap.studentId) {
+        const st = await ctx.db.get(ap.studentId);
+        if (st) {
+          const r = await purgeStudentDependents(ctx, st);
+          scoresRemoved += r.scoresRemoved;
+          studentsRemoved++;
+        }
+      }
+      await ctx.db.delete(ap._id);
+    }
+    return { assessmentsRemoved: assessments.length, scoresRemoved, applicationsRemoved: apps.length, convertedStudentsRemoved: studentsRemoved };
   },
 });
 

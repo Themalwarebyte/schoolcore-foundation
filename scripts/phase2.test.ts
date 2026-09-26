@@ -33,6 +33,14 @@ async function purgeSmokeLeftovers() {
       { name: "purgeSmokeEnrollments" } as never,
     )) as unknown;
     console.log(`  smoke cleanup: ${JSON.stringify(res)}`);
+    // Old locked SMOKE assessments leave permanent mark holes for seeded
+    // students, which would wrongly block the completeness gate on reruns.
+    const res2 = (await c.action(
+      (anyApi as unknown as { diagnostics: { runInternal: never } }).diagnostics
+        .runInternal as never,
+      { name: "purgeSmokeAssessments" } as never,
+    )) as unknown;
+    console.log(`  smoke assessment cleanup: ${JSON.stringify(res2)}`);
   } catch (err) {
     console.log(`  smoke cleanup skipped: ${describeErr(err)}`);
   } finally {

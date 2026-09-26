@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -115,8 +116,7 @@ export function ImportStudentsDialog({
       onImported?.();
     } catch (err) {
       // Server rejects with the first blocking error (all-or-nothing import).
-      const msg = err instanceof Error ? err.message : String(err);
-      toast.error("Import blocked", { description: msg.slice(0, 220) });
+      toast.error("Import blocked", { description: friendlyError(err) });
     }
   };
 

@@ -131,14 +131,14 @@ export default function Onboarding() {
           <DialogHeader><DialogTitle>Step 1 — School profile</DialogTitle>
             <DialogDescription>Contacts and location details for your school.</DialogDescription></DialogHeader>
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1"><Label>Phone</Label><Input value={phone} onChange={(e) => setPhone(e.target.value)} /></div>
-            <div className="space-y-1"><Label>Email</Label><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
-            <div className="space-y-1"><Label>Website</Label><Input value={website} onChange={(e) => setWebsite(e.target.value)} /></div>
-            <div className="space-y-1"><Label>Currency</Label><Input value={currency} onChange={(e) => setCurrency(e.target.value)} /></div>
-            <div className="space-y-1 col-span-2"><Label>Physical address</Label><Input value={physical} onChange={(e) => setPhysical(e.target.value)} /></div>
-            <div className="space-y-1 col-span-2"><Label>Postal address</Label><Input value={postal} onChange={(e) => setPostal(e.target.value)} /></div>
-            <div className="space-y-1"><Label>County / state</Label><Input value={county} onChange={(e) => setCounty(e.target.value)} /></div>
-            <div className="space-y-1"><Label>Country</Label><Input value={country} onChange={(e) => setCountry(e.target.value)} /></div>
+            <div className="space-y-1"><Label htmlFor="ob-phone">Phone</Label><Input id="ob-phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} /></div>
+            <div className="space-y-1"><Label htmlFor="ob-email">Email</Label><Input id="ob-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
+            <div className="space-y-1"><Label htmlFor="ob-website">Website</Label><Input id="ob-website" value={website} onChange={(e) => setWebsite(e.target.value)} /></div>
+            <div className="space-y-1"><Label htmlFor="ob-currency">Currency</Label><Input id="ob-currency" value={currency} onChange={(e) => setCurrency(e.target.value)} /></div>
+            <div className="space-y-1 col-span-2"><Label htmlFor="ob-physical">Physical address</Label><Input id="ob-physical" value={physical} onChange={(e) => setPhysical(e.target.value)} /></div>
+            <div className="space-y-1 col-span-2"><Label htmlFor="ob-postal">Postal address</Label><Input id="ob-postal" value={postal} onChange={(e) => setPostal(e.target.value)} /></div>
+            <div className="space-y-1"><Label htmlFor="ob-county">County / state</Label><Input id="ob-county" value={county} onChange={(e) => setCounty(e.target.value)} /></div>
+            <div className="space-y-1"><Label htmlFor="ob-country">Country</Label><Input id="ob-country" value={country} onChange={(e) => setCountry(e.target.value)} /></div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setProfileOpen(false)}>Cancel</Button>
@@ -164,14 +164,14 @@ export default function Onboarding() {
             <DialogDescription>Creates the academic year, terms, grade levels, classes (per stream) and subjects in one pass.</DialogDescription></DialogHeader>
           <div className="grid gap-3">
             <div className="grid grid-cols-3 gap-3">
-              <div className="space-y-1"><Label>Year name *</Label><Input value={yearName} onChange={(e) => setYearName(e.target.value)} /></div>
-              <div className="space-y-1"><Label>Start *</Label><Input type="date" value={yearStart} onChange={(e) => setYearStart(e.target.value)} /></div>
-              <div className="space-y-1"><Label>End *</Label><Input type="date" value={yearEnd} onChange={(e) => setYearEnd(e.target.value)} /></div>
+              <div className="space-y-1"><Label htmlFor="ob-year-name">Year name *</Label><Input id="ob-year-name" value={yearName} onChange={(e) => setYearName(e.target.value)} /></div>
+              <div className="space-y-1"><Label htmlFor="ob-year-start">Start *</Label><Input id="ob-year-start" type="date" value={yearStart} onChange={(e) => setYearStart(e.target.value)} /></div>
+              <div className="space-y-1"><Label htmlFor="ob-year-end">End *</Label><Input id="ob-year-end" type="date" value={yearEnd} onChange={(e) => setYearEnd(e.target.value)} /></div>
             </div>
-            <div className="space-y-1"><Label>Number of terms</Label><Input type="number" value={termCount} onChange={(e) => setTermCount(e.target.value)} /></div>
-            <div className="space-y-1"><Label>Grades (comma-separated) *</Label><Input value={gradeNames} onChange={(e) => setGradeNames(e.target.value)} /></div>
-            <div className="space-y-1"><Label>Streams (comma-separated)</Label><Input value={streams} onChange={(e) => setStreams(e.target.value)} /></div>
-            <div className="space-y-1"><Label>Subjects (comma-separated) *</Label><Input value={subjectNames} onChange={(e) => setSubjectNames(e.target.value)} /></div>
+            <div className="space-y-1"><Label htmlFor="ob-term-count">Number of terms</Label><Input id="ob-term-count" type="number" value={termCount} onChange={(e) => setTermCount(e.target.value)} /></div>
+            <div className="space-y-1"><Label htmlFor="ob-grades">Grades (comma-separated) *</Label><Input id="ob-grades" value={gradeNames} onChange={(e) => setGradeNames(e.target.value)} /></div>
+            <div className="space-y-1"><Label htmlFor="ob-streams">Streams (comma-separated)</Label><Input id="ob-streams" value={streams} onChange={(e) => setStreams(e.target.value)} /></div>
+            <div className="space-y-1"><Label htmlFor="ob-subjects">Subjects (comma-separated) *</Label><Input id="ob-subjects" value={subjectNames} onChange={(e) => setSubjectNames(e.target.value)} /></div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAcademicsOpen(false)}>Cancel</Button>
@@ -205,8 +205,8 @@ export default function Onboarding() {
               { role: "accountant", label: "Accountant", email: accountantEmail, name: accountantName, setEmail: setAccountantEmail, setName: setAccountantName },
             ].map((u) => (
               <div key={u.role} className="grid grid-cols-2 gap-2">
-                <div className="space-y-1"><Label>{u.label} email</Label><Input type="email" value={u.email} onChange={(e) => u.setEmail(e.target.value)} /></div>
-                <div className="space-y-1"><Label>Name</Label><Input value={u.name} onChange={(e) => u.setName(e.target.value)} /></div>
+                <div className="space-y-1"><Label htmlFor={`ob-${u.role}-email`}>{u.label} email</Label><Input id={`ob-${u.role}-email`} type="email" value={u.email} onChange={(e) => u.setEmail(e.target.value)} /></div>
+                <div className="space-y-1"><Label htmlFor={`ob-${u.role}-name`}>Name</Label><Input id={`ob-${u.role}-name`} value={u.name} onChange={(e) => u.setName(e.target.value)} /></div>
               </div>
             ))}
           </div>
@@ -240,7 +240,7 @@ export default function Onboarding() {
               Activation flips the school from onboarding to fully active. Type the school name to confirm.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <Input value={confirmName} onChange={(e) => setConfirmName(e.target.value)} placeholder={status?.schoolName ?? ""} />
+          <Input aria-label="Type the school name to confirm activation" value={confirmName} onChange={(e) => setConfirmName(e.target.value)} placeholder={status?.schoolName ?? ""} />
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction

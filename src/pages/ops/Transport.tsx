@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -346,7 +347,7 @@ function AssignmentsTab({ assignments }: { assignments: Array<{ _id: string; stu
                   setRouteId("");
                   setStopId("");
                 } catch (e) {
-                  toast.error(e instanceof Error ? e.message : "Assignment failed");
+                  toast.error(friendlyError(e, "Assignment failed"));
                 }
               }}
             >
