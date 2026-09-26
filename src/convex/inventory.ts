@@ -206,7 +206,6 @@ export const recordMovement = mutation({
     const item = await getSchoolRecord(ctx, schoolId, "inventoryItems", itemId);
     if (!(quantity > 0)) throw new ConvexError("Quantity must be positive.");
     const incoming = movementType === "received" || movementType === "return";
-    const outgoing = movementType === "issued" || movementType === "adjustment";
     let newBalance: number;
     if (incoming) newBalance = item.quantity + quantity;
     else {

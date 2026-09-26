@@ -24,37 +24,26 @@ export default function Dashboard() {
   const overview = useQuery(api.dashboard.overview);
   const activity = useQuery(api.auditLogs.recent, { limit: 8 });
   const { can, role } = usePermissions();
-  const navigate = useNavigate();
-
-  // Phase 4: portal roles are redirected to their portals (also enforced in
-  // the school layout, this keeps direct /dashboard visits consistent).
-  if (role === "parent") return <Navigate to="/portal" replace />;
-  if (role === "student") return <Navigate to="/student" replace />;
 
   // Phase 2: teacher home (replaces the admin dashboard for teachers).
+  // Queried unconditionally (hooks must run before any early return);
+  // "skip" avoids the server call for non-teachers.
   const showTeacherHome = can("attendance.take") && !can("users.view");
   const teacherHome = useQuery(
     api.academicOps.teacherHome,
     showTeacherHome ? {} : "skip",
   );
 
+  // Phase 4: portal roles are redirected to their portals (also enforced in
+  // the school layout, this keeps direct /dashboard visits consistent).
+  if (role === "parent") return <Navigate to="/portal" replace />;
+  if (role === "student") return <Navigate to="/student" replace />;
+
   if (showTeacherHome) {
     return <TeacherHome data={teacherHome} />;
   }
 
   return <AdminHome overview={overview} activity={activity} />;
-
-  /* Metric card definitions shared by the admin dashboard. */
-  function cards(): { label: string; value: number | undefined; icon: typeof GraduationCap; to: string }[] {
-    return [
-      { label: "Total Students", value: overview?.counts.students, icon: GraduationCap, to: "/students" },
-      { label: "Total Staff", value: overview?.counts.staff, icon: UserRound, to: "/staff" },
-      { label: "Teachers", value: overview?.counts.teachers, icon: UserRound, to: "/staff" },
-      { label: "Guardians", value: overview?.counts.guardians, icon: Users, to: "/guardians" },
-      { label: "Active Classes", value: overview?.counts.classes, icon: Grid3X3, to: "/academics/classes" },
-      { label: "Subjects", value: overview?.counts.subjects, icon: BookOpen, to: "/academics/subjects" },
-    ];
-  }
 }
 
 /* ---------------------------------------------------------------------- */

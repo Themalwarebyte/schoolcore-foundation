@@ -297,7 +297,7 @@ export const processJobInternal = internalMutation({
       .withIndex("by_school_status", (q) => q.eq("schoolId", job.schoolId).eq("status", "queued"))
       .collect()
       .then((ms) => ms.filter((m) => m.event === job.event).slice(0, size));
-    let sent = 0, failed = 0;
+    const sent = 0; let failed = 0;
     for (const m of pending) {
       // Provider send would happen here; without credentials, fail fast with
       // a clear reason and bounded retries (max 3 → permanent failure).

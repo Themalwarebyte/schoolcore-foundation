@@ -404,7 +404,9 @@ export const parentTransportView = query({
   args: {},
   handler: async (ctx) => {
     const session = await requirePermission(ctx, "gps.view");
-    const schoolId = session.schoolId as Id<"schools">;
+    // Tenancy guard: every transport assignment read below belongs to the
+    // caller's school, so a missing school context is a hard error.
+    if (!session.schoolId) throw new ConvexError("Select a school to continue.");
     if (session.role.role !== "parent" && session.role.role !== "school_admin" && session.role.role !== "principal") {
       throw new ConvexError("Permission denied.");
     }

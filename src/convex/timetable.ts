@@ -314,8 +314,7 @@ export const listEntries = query({
       .withIndex("by_school_year", (q) => q.eq("schoolId", schoolId).eq("academicYearId", yearId as Id<"academicYears">))
       .collect();
     // Teachers only see their own timetable (published entries only).
-    // Managers see the whole grid; drafts only when explicitly requested.
-    const isManager = session.role.role === "school_admin" || session.role.role === "principal" || session.role.role === "super_admin";
+    // Managers and other roles see the whole grid; drafts only when explicitly requested.
     if (session.role.role === "teacher") {
       const me = await ctx.db
         .query("staff")

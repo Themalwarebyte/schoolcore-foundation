@@ -185,7 +185,7 @@ export function PortalProfile() {
                       toast.success("Contact details updated");
                     } catch (err) {
                       toast.error("Could not save your changes.", {
-                        description: undefined,
+                        description: friendlyError(err),
                       });
                     } finally {
                       setSaving(false);

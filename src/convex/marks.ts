@@ -4,7 +4,7 @@ import type { Id } from "./_generated/dataModel";
 import { requirePermission, getSchoolRecord } from "./session";
 import { recordAudit } from "./audit";
 import { MARK_STATUSES } from "./schema";
-import { validateScoreRow, completeness, type ScoreInput } from "./engines/results";
+import { validateScoreRow, completeness } from "./engines/results";
 import { assertTeacherAuthorized } from "./assessments";
 import { activeEnrollmentsOnDate } from "./attendance";
 

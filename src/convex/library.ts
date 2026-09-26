@@ -358,7 +358,6 @@ export const myLoans = query({
   handler: async (ctx) => {
     const session = await getSession(ctx);
     if (!session.schoolId) return [];
-    const schoolId = session.schoolId as Id<"schools">;
     // Own loans via staff identity (student portal loans arrive in Phase 6 portals).
     const ownStaff = await ctx.db
       .query("staff")

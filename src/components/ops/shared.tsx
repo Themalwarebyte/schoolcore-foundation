@@ -3,7 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Search, Plus } from "lucide-react";
+import { Search } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
 /* Stat card                                                           */

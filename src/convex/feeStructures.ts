@@ -1,5 +1,5 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, query, type MutationCtx } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requirePermission, getSchoolRecord } from "./session";
 import { recordAudit } from "./audit";
@@ -101,7 +101,8 @@ export const saveStructure = mutation({
     }
     let structureId = feeStructureId;
     if (structureId) {
-      const existing = await getSchoolRecord(ctx, schoolId, "feeStructures", structureId);
+      // Tenancy check before editing (result intentionally not bound).
+      await getSchoolRecord(ctx, schoolId, "feeStructures", structureId);
       await ctx.db.patch(structureId, {
         name: name.trim(), termId: term._id, applicableGradeLevelIds, updatedAt: Date.now(),
       });

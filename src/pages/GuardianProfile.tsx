@@ -4,7 +4,7 @@ import { api } from "@/convex/_generated/api";
 import { Link, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
 import { friendlyError } from "@/lib/errors";
-import { PageHeader, Can } from "@/components/layouts/school-layout";
+import { Can } from "@/components/layouts/school-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -78,7 +78,7 @@ export default function GuardianProfile() {
             ) : (
               <div className="divide-y">
                 {guardian.children.filter((c) => c !== null).map((c) => (
-                  <ChildRow key={c.linkId} child={c} guardianId={guardian._id} />
+                  <ChildRow key={c.linkId} child={c} />
                 ))}
               </div>
             )}
@@ -89,7 +89,7 @@ export default function GuardianProfile() {
   );
 }
 
-function ChildRow({ child, guardianId }: { child: { linkId: string; _id: string; name: string; admissionNumber: string }; guardianId: string }) {
+function ChildRow({ child }: { child: { linkId: string; _id: string; name: string; admissionNumber: string } }) {
   const unlink = useMutation(api.guardians.unlinkStudent);
   const [open, setOpen] = useState(false);
   return (
@@ -134,7 +134,6 @@ function ChildRow({ child, guardianId }: { child: { linkId: string; _id: string;
 function LinkChildDialog({ guardianId }: { guardianId: string }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const [results, setResults] = useState<Array<{ _id: string; name: string; admissionNumber: string }> | undefined>();
   const link = useMutation(api.guardians.linkStudent);
 
   // Simple debounced search against the students list API.
@@ -142,8 +141,7 @@ function LinkChildDialog({ guardianId }: { guardianId: string }) {
     ? { search, paginationOpts: { numItems: 8, cursor: null } }
     : "skip");
 
-  return (
-    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) { setSearch(""); setResults(undefined); } }}>
+  return (      <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) { setSearch(""); } }}>
       <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
         <Link2 className="size-4" /> Link student
       </Button>

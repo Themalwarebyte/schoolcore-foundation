@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { NavLink, Navigate, Outlet, useNavigate } from "react-router";
-import { useMutation, useQuery } from "convex/react";
+import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useSession, roleLabel } from "@/hooks/use-session";
 import { useAuthActions } from "@convex-dev/auth/react";
@@ -11,7 +11,7 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Home, CalendarCheck, Award, ClipboardList, Clock, Bell, Wallet, UserRound,
+  Home, CalendarCheck, Award, ClipboardList, Bell, Wallet, UserRound,
   LogOut, Loader2, Megaphone, Menu, X, FileSpreadsheet,
 } from "lucide-react";
 

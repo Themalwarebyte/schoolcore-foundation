@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
@@ -20,6 +20,12 @@ export default function MedicalPage() {
   const students = useQuery(api.students.list, { paginationOpts: { numItems: 300, cursor: null } });
   const profile = useQuery(api.medical.getMedicalProfile, profileStudent ? { studentId: profileStudent.id as never } : "skip");
   const auditAccess = useMutation(api.medical.auditMedicalAccess);
+  // Fire-and-forget access audit: opening a medical profile is recorded so
+  // sensitive-data reads leave a trail (backend records the same on writes).
+  useEffect(() => {
+    if (profileStudent) auditAccess({ studentId: profileStudent.id as never });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileStudent?.id]);
 
   return (
     <div>

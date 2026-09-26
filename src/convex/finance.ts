@@ -1,5 +1,5 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, internalMutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requirePermission, getSchoolRecord } from "./session";
 import { recordAudit } from "./audit";
@@ -106,8 +106,6 @@ const NUMBER_TABLES = {
   RFND: "refunds",
   EXP: "expenses",
 } as const;
-
-type NumberedTable = (typeof NUMBER_TABLES)[Exclude<NumberKind, "TXN">];
 
 function docNumber(
   kind: Exclude<NumberKind, "TXN">,

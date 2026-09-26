@@ -360,7 +360,6 @@ function MarksGrid({
 
   const [scores, setScores] = useState<Record<string, string>>({});
   const [absents, setAbsents] = useState<Record<string, "absent" | "exempt">>({});
-  const [seeded, setSeeded] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const editable = grid?.editable ?? false;
 
@@ -380,7 +379,6 @@ function MarksGrid({
     setScores(nextScores);
     setAbsents(nextAbsents);
     setLastSeededKey(key);
-    setSeeded(key);
   }
 
   const buildMarks = () =>
@@ -416,7 +414,6 @@ function MarksGrid({
     try {
       const res = await saveGrid({ assessmentId: assessmentId as never, marks: buildMarks(), asDraft });
       toast.success(`Saved (${res.changed} changed)`);
-      setSeeded(null);
     } catch (err) {
       toast.error("Unable to save marks.", { description: friendlyError(err) });
     } finally {
@@ -436,7 +433,6 @@ function MarksGrid({
         subjectId: subjectId as never,
       });
       toast.success(`Results submitted for approval (${r.count} students)`);
-      setSeeded(null);
     } catch (err) {
       toast.error("Unable to submit results.", { description: friendlyError(err) });
     } finally {

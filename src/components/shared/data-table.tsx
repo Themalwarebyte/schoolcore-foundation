@@ -104,7 +104,9 @@ export function DataTable<T extends { _id?: string }>({
       </div>
       {(hasNextPage || (page ?? 0) > 0) && (
         <div className="flex items-center justify-between border-t px-4 py-3">
-          <p className="text-xs text-muted-foreground">Page {page + 1}</p>
+          <p className="text-xs text-muted-foreground">
+            Page {page + 1} · {pageSize} rows per page
+          </p>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" disabled={page === 0} onClick={() => onPageChange(page - 1)}>
               <ChevronLeft className="size-4" /> Prev

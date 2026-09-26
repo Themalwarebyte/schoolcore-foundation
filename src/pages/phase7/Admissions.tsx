@@ -89,10 +89,6 @@ export default function Admissions() {
     convYearId ? { academicYearId: convYearId as never } : "skip");
   const detail = useQuery(api.phase7.admissions.applicationDetail,
     detailId ? { applicationId: detailId as never } : "skip");
-  const convertApplicant = useQuery(
-    api.phase7.admissions.applicationDetail,
-    convertId ? { applicationId: convertId as never } : "skip",
-  );
 
   const submitApplication = useMutation(api.phase7.admissions.submitApplication);
   const moveToReview = useMutation(api.phase7.admissions.moveToReview);

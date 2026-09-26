@@ -1,5 +1,4 @@
 import { internalQuery, internalMutation } from "./_generated/server";
-import { ConvexError } from "convex/values";
 import { v } from "convex/values";
 import type { Id, Doc } from "./_generated/dataModel";
 

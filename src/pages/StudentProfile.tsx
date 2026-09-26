@@ -4,13 +4,12 @@ import { api } from "@/convex/_generated/api";
 import { Link, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
 import { friendlyError } from "@/lib/errors";
-import { PageHeader, Can } from "@/components/layouts/school-layout";
+import { Can } from "@/components/layouts/school-layout";
 import { StatusBadge, formatDate } from "@/lib/status";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Separator } from "@/components/ui/separator";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";

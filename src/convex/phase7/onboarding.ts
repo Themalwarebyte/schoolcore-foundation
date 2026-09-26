@@ -205,9 +205,15 @@ export const setupAcademics = mutation({
       }
     }
 
+    // Idempotent: skip subjects that already exist (case-insensitive) so
+    // re-saving School Setup never duplicates them; new names still get added.
+    const existingSubjectNames = new Set(existingSubjects.map((s) => s.name.trim().toLowerCase()));
     for (const subject of subjectNames) {
       const name = subject.trim();
       if (!name) continue;
+      const key = name.toLowerCase();
+      if (existingSubjectNames.has(key)) continue;
+      existingSubjectNames.add(key);
       const code = name.slice(0, 4).toUpperCase() + Math.random().toString(36).slice(2, 4).toUpperCase();
       await ctx.db.insert("subjects", { schoolId, name, code, status: "active" });
     }
