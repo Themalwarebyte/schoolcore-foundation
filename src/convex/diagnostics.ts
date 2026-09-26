@@ -373,7 +373,10 @@ export const publishDemoSubjectResults = internalMutation({
       .collect();
     const now = Date.now();
     for (const r of results) {
-      if (r.status === "submitted" || r.status === "approved") {
+      // Demo self-heal: rows stuck in "reopened" (a side effect of the
+      // harness's rerun cleanup, which reopens all rows) are republished so
+      // the demo parent/student portals stay complete.
+      if (r.status === "submitted" || r.status === "approved" || r.status === "reopened") {
         await ctx.db.patch(r._id, { status: "published", publishedAt: now, updatedAt: now });
         resultsPublished++;
       }
@@ -746,7 +749,11 @@ export const purgeSmokeAssessments = internalMutation({
   args: {},
   handler: async (ctx) => {
     const assessments = (await ctx.db.query("assessments").collect()).filter(
-      (a) => a.title.startsWith("SMOKE"),
+      (a) =>
+        a.title.startsWith("SMOKE") &&
+        // The "other teacher" fixture is deliberately persistent: the
+        // negative tests (foreign marks grid, setStatus transition) reuse it.
+        a.title !== "SMOKE Other Teacher Assessment",
     );
     let scoresRemoved = 0;
     for (const a of assessments) {
@@ -788,7 +795,9 @@ export const purgeSmokeAssessments = internalMutation({
  * Internal: give the named staff member one active allocation in a class where
  * they had none (idempotent — skipped if they already teach there), and attach
  * a SMOKE assessment owned by that staff member so the "another teacher's
- * marks grid" negative test has a real target.
+ * marks grid" negative test has a real target. Self-healing: when the purge
+ * removed the fixture assessment but the (deliberately persistent) allocation
+ * remains, the fixture is recreated on the existing allocation.
  */
 export const ensureSecondTeacherCase = internalMutation({
   args: { teacherEmail: v.string() },
@@ -797,74 +806,90 @@ export const ensureSecondTeacherCase = internalMutation({
       (s) => s.email === teacherEmail,
     );
     if (!staff) return { ok: false as const, reason: "staff-not-found" };
-    const sections = (await ctx.db.query("classSections").collect()).filter(
-      (s) => s.status === "active",
-    );
     const allocs = await ctx.db.query("teacherAllocations").collect();
     const mine = allocs.filter(
       (a) => a.staffId === staff._id && a.status === "active",
     );
-    const covered = new Set(mine.map((a) => a.classSectionId));
-    const target = sections.find((s) => !covered.has(s._id));
-    if (!target) return { ok: false as const, reason: "no-uncovered-section" };
     const subjects = (await ctx.db.query("subjects").collect()).filter(
       (s) => s.status === "active",
     );
-    const subject = subjects[0];
     const years = await ctx.db.query("academicYears").collect();
     const year = years.find((y) => y.isCurrent) ?? years[years.length - 1];
-    if (!subject || !year) return { ok: false as const, reason: "no-subject-or-year" };
+    if (!year) return { ok: false as const, reason: "no-subject-or-year" };
 
-    // Allocation (idempotent — reuse if it already exists).
-    const existing = allocs.find(
-      (a) =>
-        a.staffId === staff._id &&
-        a.classSectionId === target._id &&
-        a.subjectId === subject._id &&
-        a.academicYearId === year._id,
-    );
-    const allocationId =
-      existing?._id ??
-      (await ctx.db.insert("teacherAllocations", {
-        schoolId: staff.schoolId,
-        staffId: staff._id,
-        subjectId: subject._id,
-        classSectionId: target._id,
-        academicYearId: year._id,
-        status: "active",
-      }));
+    // Anchor: an existing allocation of this teacher (current year first).
+    const anchor = mine.find((a) => a.academicYearId === year._id) ?? mine[0];
+    let allocationId: (typeof mine)[number]["_id"];
+    let classSectionId: (typeof mine)[number]["classSectionId"];
+    let subjectId: (typeof mine)[number]["subjectId"];
+    let anchorYearId: (typeof mine)[number]["academicYearId"];
+    if (anchor) {
+      allocationId = anchor._id;
+      classSectionId = anchor.classSectionId;
+      subjectId = anchor.subjectId;
+      anchorYearId = anchor.academicYearId;
+    } else {
+      const sections = (await ctx.db.query("classSections").collect()).filter(
+        (s) => s.status === "active",
+      );
+      const covered = new Set(mine.map((a) => a.classSectionId));
+      const target = sections.find((s) => !covered.has(s._id));
+      if (!target) return { ok: false as const, reason: "no-uncovered-section" };
+      const subject = subjects[0];
+      if (!subject) return { ok: false as const, reason: "no-subject-or-year" };
+      const existing = allocs.find(
+        (a) =>
+          a.staffId === staff._id &&
+          a.classSectionId === target._id &&
+          a.subjectId === subject._id &&
+          a.academicYearId === year._id,
+      );
+      allocationId =
+        existing?._id ??
+        (await ctx.db.insert("teacherAllocations", {
+          schoolId: staff.schoolId,
+          staffId: staff._id,
+          subjectId: subject._id,
+          classSectionId: target._id,
+          academicYearId: year._id,
+          status: "active",
+        }));
+      classSectionId = target._id;
+      subjectId = subject._id;
+      anchorYearId = year._id;
+    }
 
     // SMOKE assessment owned by this staff member in that class.
     const dup = (await ctx.db.query("assessments").collect()).find(
-      (a) => a.title === "SMOKE Other Teacher Assessment",
+      (a) => a.title === "SMOKE Other Teacher Assessment" && a.staffId === staff._id,
     );
-    const assessmentId =
-      dup?._id ??
-      (await ctx.db.insert("assessments", {
-        schoolId: staff.schoolId,
-        academicYearId: year._id,
-        termId: (
-          await ctx.db
-            .query("terms")
-            .withIndex("by_academic_year", (q) => q.eq("academicYearId", year._id))
-            .collect()
-        )
-          .sort((a, b) => a.displayOrder - b.displayOrder)[0]?._id,
-        classSectionId: target._id,
-        subjectId: subject._id,
-        teacherAllocationId: allocationId,
-        staffId: staff._id,
-        assessmentTypeId: (
-          await ctx.db.query("assessmentTypes").collect()
-        )[0]._id,
-        title: "SMOKE Other Teacher Assessment",
-        assessmentDate: "2026-03-05",
-        maxMarks: 50,
-        weight: 10,
-        countsTowardFinal: true,
-        status: "marking",
-        createdBy: (staff.userId ?? (await ctx.db.query("users").collect())[0]?._id) as never,
-      }));
+    if (dup) return { ok: true as const, allocationId, assessmentId: dup._id };
+
+    const assessmentId = await ctx.db.insert("assessments", {
+      schoolId: staff.schoolId,
+      academicYearId: anchorYearId,
+      termId: (
+        await ctx.db
+          .query("terms")
+          .withIndex("by_academic_year", (q) => q.eq("academicYearId", anchorYearId))
+          .collect()
+      )
+        .sort((a, b) => a.displayOrder - b.displayOrder)[0]?._id,
+      classSectionId,
+      subjectId,
+      teacherAllocationId: allocationId,
+      staffId: staff._id,
+      assessmentTypeId: (
+        await ctx.db.query("assessmentTypes").collect()
+      )[0]._id,
+      title: "SMOKE Other Teacher Assessment",
+      assessmentDate: "2026-03-05",
+      maxMarks: 50,
+      weight: 10,
+      countsTowardFinal: true,
+      status: "marking",
+      createdBy: (staff.userId ?? (await ctx.db.query("users").collect())[0]?._id) as never,
+    });
 
     return { ok: true as const, allocationId, assessmentId };
   },

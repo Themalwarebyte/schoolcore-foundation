@@ -66,6 +66,13 @@ const purged = await BR1("purgeSmokeEnrollments");
 console.log(`  students removed:          ${purged?.studentsRemoved ?? 0}`);
 console.log(`  dependent rows removed:    ${(purged?.enrollmentsRemoved ?? 0) + (purged?.scoresRemoved ?? 0) + (purged?.guardiansRemoved ?? 0)}`);
 
+// Also purge harness assessments + converted application students (SMOKE
+// naming variants from all harnesses) so they cannot block future reruns.
+const purged2 = await BR1("purgeSmokeAssessments");
+console.log(`  assessments removed:       ${purged2?.assessmentsRemoved ?? 0}`);
+console.log(`  applications removed:      ${purged2?.applicationsRemoved ?? 0}`);
+console.log(`  converted students removed:${purged2?.convertedStudentsRemoved ?? 0}`);
+
 console.log("\n== 6. Parent portal readiness ==");
 const parent = await signIn("parent.wanjiku@greenfield.ac.ke", "Parent#2026");
 if (!parent.jwt) {

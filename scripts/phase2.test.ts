@@ -641,10 +641,12 @@ let assessmentId = "";
       try {
         const { ConvexHttpClient: CH } = await import("convex/browser");
         const adminClient = new CH(url);
-        const res = (await adminClient.mutation(
-          (anyApi as unknown as { diagnostics: { ensureSecondTeacherCase: never } }).diagnostics
-            .ensureSecondTeacherCase as never,
-          { teacherEmail: "collins.barasa@greenfield.ac.ke" } as never,
+        // ensureSecondTeacherCase is internal — drive it through the
+        // name-allowlisted runInternal bridge (same as purgeSmokeLeftovers).
+        const res = (await adminClient.action(
+          (anyApi as unknown as { diagnostics: { runInternal: never } }).diagnostics
+            .runInternal as never,
+          { name: "ensureSecondTeacherCase" } as never,
         )) as unknown;
         void res;
         adminClient.close?.();
