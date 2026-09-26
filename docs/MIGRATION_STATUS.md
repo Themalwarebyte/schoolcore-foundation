@@ -8,6 +8,10 @@
 > **Rules in force:** no data migration yet · no production modification · no
 > Convex Cloud changes · no secret values in the repo · no destructive
 > actions · no git-history purges.
+>
+> Confirmed decisions and the host-specific execution runbook live in
+> [`SELF_HOST_EXECUTION_CHECKLIST.md`](./SELF_HOST_EXECUTION_CHECKLIST.md)
+> (schoolcore.ooflowdesk.com on gman-02).
 
 ---
 
