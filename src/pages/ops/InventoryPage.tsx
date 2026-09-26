@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader, Can } from "@/components/layouts/school-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -270,7 +271,7 @@ function MovementButtons({ itemId, onRecord }: { itemId: string; onRecord: Retur
               await onRecord({ itemId: itemId as never, movementType: t, quantity: Number(qty) });
               toast.success(`Stock ${t} recorded`);
             } catch (e) {
-              toast.error(e instanceof Error ? e.message : "Movement failed");
+              toast.error(friendlyError(e, "Movement failed"));
             }
           }}
         >

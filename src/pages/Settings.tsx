@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { PageHeader } from "@/components/layouts/school-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -67,7 +68,7 @@ export default function Settings() {
       toast.success("Settings saved");
       setDirty(false);
     } catch (e) {
-      toast.error("Unable to save settings.", { description: e instanceof Error ? e.message : undefined });
+      toast.error("Unable to save settings.", { description: friendlyError(e) });
     } finally {
       setSaving(false);
     }
@@ -178,7 +179,7 @@ export default function Settings() {
                   onValueChange={(v) =>
                     setCurrentYear({ yearId: v as never })
                       .then(() => toast.success("Current academic year updated"))
-                      .catch((e) => toast.error("Unable to change year.", { description: e instanceof Error ? e.message : undefined }))
+                      .catch((e) => toast.error("Unable to change year.", { description: friendlyError(e) }))
                   }
                 >
                   <SelectTrigger><SelectValue placeholder="Not set" /></SelectTrigger>
@@ -196,7 +197,7 @@ export default function Settings() {
                   onValueChange={(v) =>
                     setCurrentTerm({ termId: v as never })
                       .then(() => toast.success("Current term updated"))
-                      .catch((e) => toast.error("Unable to change term.", { description: e instanceof Error ? e.message : undefined }))
+                      .catch((e) => toast.error("Unable to change term.", { description: friendlyError(e) }))
                   }
                 >
                   <SelectTrigger><SelectValue placeholder="Not set" /></SelectTrigger>

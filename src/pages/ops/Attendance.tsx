@@ -124,9 +124,11 @@ function LessonRegisterView({
     <>
       <ScopeBar>
         <div>
-          <Label className="text-xs text-muted-foreground">Date</Label>
+          <Label className="text-xs text-muted-foreground" htmlFor="lesson-date">Date</Label>
           <Input
+            id="lesson-date"
             type="date"
+            aria-label="Lesson date"
             value={date}
             max={new Date().toISOString().slice(0, 10)}
             onChange={(e) => setDate(e.target.value)}
@@ -226,7 +228,7 @@ function LessonRegisterForEntry({
       setSeededFor(null);
     } catch (err) {
       toast.error("Unable to save lesson attendance.", {
-        description: undefined,
+        description: friendlyError(err),
       });
     } finally {
       setSaving(false);
@@ -361,7 +363,7 @@ function RegisterView({
       setSeededFor(null); // re-seed from server state
     } catch (err) {
       toast.error("Unable to save attendance.", {
-        description: undefined,
+        description: friendlyError(err),
       });
     } finally {
       setSaving(false);
@@ -373,8 +375,9 @@ function RegisterView({
       <ScopeBar>
         <ClassSelect yearId="" classSectionId={classSectionId} onChange={setClassSectionId} />
         <div>
-          <Label className="text-xs text-muted-foreground">Date</Label>
+          <Label className="text-xs text-muted-foreground" htmlFor="daily-date">Date</Label>
           <Input
+            id="daily-date"
             type="date"
             value={date}
             max={new Date().toISOString().slice(0, 10)}
@@ -536,6 +539,7 @@ function ReasonDialog({
         <Textarea
           className="mt-3"
           rows={3}
+          aria-label={`Absence reason for ${target.name}`}
           value={value}
           onChange={(e) => onValueChange(e.target.value)}
           placeholder="e.g. Medical appointment (note is stored with the record)"
@@ -589,12 +593,12 @@ function HistoryView({
       <ScopeBar>
         <ClassSelect yearId="" classSectionId={classSectionId} onChange={setClassSectionId} />
         <div>
-          <Label className="text-xs text-muted-foreground">From</Label>
-          <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="mt-1 bg-background" />
+          <Label className="text-xs text-muted-foreground" htmlFor="history-from">From</Label>
+          <Input id="history-from" aria-label="History start date" type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="mt-1 bg-background" />
         </div>
         <div>
-          <Label className="text-xs text-muted-foreground">To</Label>
-          <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="mt-1 bg-background" />
+          <Label className="text-xs text-muted-foreground" htmlFor="history-to">To</Label>
+          <Input id="history-to" aria-label="History end date" type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="mt-1 bg-background" />
         </div>
       </ScopeBar>
 

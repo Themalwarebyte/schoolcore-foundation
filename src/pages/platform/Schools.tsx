@@ -250,7 +250,7 @@ function StatusActions({ schoolId, name, current }: { schoolId: string; name: st
               onClick={() =>
                 setStatus({ schoolId: schoolId as never, status: next as "active" | "inactive" })
                   .then(() => toast.success(next === "inactive" ? "School deactivated" : "School activated"))
-                  .catch((e) => toast.error("Unable to change status.", { description: e instanceof Error ? e.message : undefined }))
+                  .catch((e) => toast.error("Unable to change status.", { description: friendlyError(e) }))
               }
             >
               Confirm

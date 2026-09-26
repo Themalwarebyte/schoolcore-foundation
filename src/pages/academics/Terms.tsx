@@ -123,7 +123,7 @@ export default function Terms() {
                         <Badge className="gap-1"><CheckCircle2 className="size-3" /> Current</Badge>
                       ) : (
                         <Can permission="academics.manage">
-                          <Button variant="outline" size="sm" onClick={() => setCurrent({ termId: t._id }).then(() => toast.success(`${t.name} is now current`)).catch((e) => toast.error("Unable to set current.", { description: e instanceof Error ? e.message : String(e) }))}>
+                          <Button variant="outline" size="sm" onClick={() => setCurrent({ termId: t._id }).then(() => toast.success(`${t.name} is now current`)).catch((e) => toast.error("Unable to set current.", { description: friendlyError(e) }))}>
                             Set current
                           </Button>
                         </Can>

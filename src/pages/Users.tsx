@@ -63,7 +63,7 @@ export default function Users() {
         onValueChange={(v) =>
           changeRole({ membershipId: u.membershipId as never, role: v })
             .then(() => toast.success("Role updated"))
-            .catch((e) => toast.error("Unable to change role.", { description: e instanceof Error ? e.message : undefined }))
+            .catch((e) => toast.error("Unable to change role.", { description: friendlyError(e) }))
         }
         disabled={!can("users.update") || u.role === "super_admin"}
       >
@@ -105,7 +105,7 @@ export default function Users() {
                 onClick={() =>
                   setActive({ userId: u.userId as never, isActive: false })
                     .then(() => toast.success("Account disabled"))
-                    .catch((e) => toast.error("Unable to disable.", { description: e instanceof Error ? e.message : undefined }))
+                    .catch((e) => toast.error("Unable to disable.", { description: friendlyError(e) }))
                 }
               >
                 <UserX className="mr-2 size-4" /> Disable account
@@ -115,7 +115,7 @@ export default function Users() {
                 onClick={() =>
                   setActive({ userId: u.userId as never, isActive: true })
                     .then(() => toast.success("Account enabled"))
-                    .catch((e) => toast.error("Unable to enable.", { description: e instanceof Error ? e.message : undefined }))
+                    .catch((e) => toast.error("Unable to enable.", { description: friendlyError(e) }))
                 }
               >
                 <UserCheck className="mr-2 size-4" /> Enable account
@@ -205,7 +205,7 @@ export default function Users() {
                   await resetAction({ userId: resetTarget.userId as never, newPassword: resetPassword });
                   toast.success("Password reset");
                 } catch (e) {
-                  toast.error("Unable to reset password.", { description: e instanceof Error ? e.message : undefined });
+                  toast.error("Unable to reset password.", { description: friendlyError(e) });
                 } finally {
                   setResetTarget(null);
                   setResetPassword("");

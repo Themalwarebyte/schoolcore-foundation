@@ -3,6 +3,7 @@ import { useAction, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useSearchParams, Link } from "react-router";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -72,7 +73,7 @@ export default function Activation() {
       await redeemToken({ token: code.trim(), newPassword: password });
       setDone(true);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Activation failed.");
+      toast.error(friendlyError(e));
     }
   };
 
@@ -116,8 +117,10 @@ export default function Activation() {
           ) : (
             <>
               <div className="space-y-1.5">
-                <Label>Activation code</Label>
+                <Label htmlFor="activation-code">Activation code</Label>
                 <Input
+                  id="activation-code"
+                  autoComplete="one-time-code"
                   value={code}
                   onChange={(e) => { setCode(e.target.value); setChecked(null); }}
                   onBlur={() => void runCheck(code)}
@@ -126,12 +129,12 @@ export default function Activation() {
                 {checking && <p className="text-xs text-muted-foreground">Checking code…</p>}
               </div>
               <div className="space-y-1.5">
-                <Label>New password</Label>
-                <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 8 characters" />
+                <Label htmlFor="new-password">New password</Label>
+                <Input id="new-password" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 8 characters" />
               </div>
               <div className="space-y-1.5">
-                <Label>Confirm password</Label>
-                <Input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
+                <Label htmlFor="confirm-password">Confirm password</Label>
+                <Input id="confirm-password" type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
               </div>
               <Button className="w-full" disabled={!code.trim() || !password || !confirm || checking || (checked !== null && !checked.valid)} onClick={submit}>
                 {isReset ? "Update password" : "Activate account"}

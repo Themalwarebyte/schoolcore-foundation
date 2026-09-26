@@ -69,7 +69,7 @@ export default function PlatformUsers() {
               onClick={() =>
                 setUserActive({ userId: u.userId as never, isActive: false })
                   .then(() => toast.success("Account disabled"))
-                  .catch((e) => toast.error("Unable to disable.", { description: e instanceof Error ? e.message : undefined }))
+                  .catch((e) => toast.error("Unable to disable.", { description: friendlyError(e) }))
               }
             >
               <UserX className="mr-2 size-4" /> Disable account
@@ -79,7 +79,7 @@ export default function PlatformUsers() {
               onClick={() =>
                 setUserActive({ userId: u.userId as never, isActive: true })
                   .then(() => toast.success("Account enabled"))
-                  .catch((e) => toast.error("Unable to enable.", { description: e instanceof Error ? e.message : undefined }))
+                  .catch((e) => toast.error("Unable to enable.", { description: friendlyError(e) }))
               }
             >
               <UserCheck className="mr-2 size-4" /> Enable account
