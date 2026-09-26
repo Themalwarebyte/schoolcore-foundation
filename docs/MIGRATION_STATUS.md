@@ -11,7 +11,8 @@
 >
 > Confirmed decisions and the host-specific execution runbook live in
 > [`SELF_HOST_EXECUTION_CHECKLIST.md`](./SELF_HOST_EXECUTION_CHECKLIST.md)
-> (schoolcore.ooflowdesk.com on gman-02).
+> (schoolcore.ooflowdesk.com on gman-02 — **Cloudflare Tunnel** ingress,
+> dashboard behind **Cloudflare Access**).
 
 ---
 
@@ -86,14 +87,15 @@ Reference: [`SERVER_DEPLOYMENT_GUIDE.md`](./SERVER_DEPLOYMENT_GUIDE.md) §2–§
 - [ ] Add `deploy/Dockerfile` + `deploy/compose.yaml` to the repo at execution time (proposed shapes in SERVER_DEPLOYMENT_GUIDE §3).
 - [ ] Verify app image builds off-box (never build on the VM — OOM history).
 
-### 2.3 Networking
-- [ ] DNS records: app, API/backend, dashboard hostnames — **OWNER DECISION REQUIRED** (names).
-- [ ] Firewall: default-deny incoming; allow 22/80/443 only.
-- [ ] Reverse proxy routes: app → SPA, api → Convex backend, dashboard → admin UI (SERVER_DEPLOYMENT_GUIDE §4.1).
+### 2.3 Networking & ingress (Cloudflare Tunnel — confirmed)
+- [x] Hostnames confirmed: `schoolcore.ooflowdesk.com` (app) · `schoolcore-api.ooflowdesk.com` (backend) · `schoolcore-dashboard.ooflowdesk.com` (dashboard).
+- [ ] Cloudflare Tunnel created; `cloudflared` connector running on `gman-02` (outbound-only — no inbound web ports).
+- [ ] Three public hostnames routed as proxied CNAMEs to the tunnel (SERVER_DEPLOYMENT_GUIDE §4.1).
+- [ ] Firewall: default-deny incoming; allow 22 only.
 
-### 2.4 TLS
-- [ ] ACME certificates issuing + auto-renewing (Caddy recommended).
-- [ ] Verify TLS on all three hostnames; enable HSTS after stability.
+### 2.4 TLS (Cloudflare edge — confirmed)
+- [ ] Cloudflare edge certificates active for all three hostnames (no origin certs).
+- [ ] WebSockets enabled; Always-HTTPS; HSTS after stability.
 
 ### 2.5 Backups
 - [ ] Backup tooling configured (`restic` or equivalent) per SERVER_DEPLOYMENT_GUIDE §5.
@@ -103,6 +105,7 @@ Reference: [`SERVER_DEPLOYMENT_GUIDE.md`](./SERVER_DEPLOYMENT_GUIDE.md) §2–§
 
 ### 2.6 Monitoring
 - [ ] Uptime probes: app URL + backend HTTP endpoint.
+- [ ] Tunnel connector health monitored (alert if `cloudflared` disconnects).
 - [ ] Disk alerts (data volume > 80%), container restart-loop alerts.
 - [ ] Alert channel decided (email via Resend post-Phase 6, or SMS) — **OWNER DECISION REQUIRED**.
 
@@ -130,7 +133,7 @@ Reference: [`SERVER_DEPLOYMENT_GUIDE.md`](./SERVER_DEPLOYMENT_GUIDE.md) §3/§8 
 
 ### 3.5 Dashboard
 - [ ] Dashboard container running; hostname configured.
-- [ ] IP-allowlist or SSO gate applied (not public) — SERVER_DEPLOYMENT_GUIDE §9.
+- [ ] **Cloudflare Access** application protecting the dashboard (not public) — SERVER_DEPLOYMENT_GUIDE §9.
 
 ---
 
@@ -191,7 +194,7 @@ Reference: [`EMAIL_RESEND_MIGRATION.md`](./EMAIL_RESEND_MIGRATION.md).
 - [ ] `RESEND_API_KEY` added to the target env file (server-side only, never `VITE_*`, never committed).
 - [ ] OTP test: request sign-in code → delivered, correctly branded, no spam folder.
 - [ ] Comm-queue test: email-channel bulk job transitions queued → sent with provider message id; failure path still records `failureReason` correctly.
-- [ ] Sunset decision at cutover: remove VLY OTP fallback (EMAIL_RESEND_MIGRATION §5 step 5).
+- [ ] `VLY_EMAIL_OTP_API_KEY` provider retired at cutover (confirmed): remove the VLY OTP fallback (EMAIL_RESEND_MIGRATION §5 step 5).
 
 ---
 
@@ -209,9 +212,9 @@ Reference: [`CONVEX_SELF_HOST_MIGRATION_PLAN.md`](./CONVEX_SELF_HOST_MIGRATION_P
 - [ ] Migration archive (final export) stored encrypted; manifest recorded (schema SHA, CLI version).
 - [ ] Import + structural validation green inside the window before any DNS change.
 
-### 7.3 DNS switch
+### 7.3 Cloudflare routing switch
 - [ ] Functional suites green on target.
-- [ ] DNS / reverse proxy re-pointed to self-host (TTL pre-lowered).
+- [ ] Public hostnames re-routed to the `gman-02` tunnel (instant; instantly reversible).
 - [ ] Post-cutover smoke: sign-in, attendance mark, invoice create, announcement send.
 - [ ] Unfreeze announcement; hyper-care monitoring begins.
 
@@ -228,6 +231,7 @@ Reference: [`CONVEX_SELF_HOST_MIGRATION_PLAN.md`](./CONVEX_SELF_HOST_MIGRATION_P
 | Date | Change |
 | --- | --- |
 | 2026-09-26 | Checklist created. Phase 0 (preparation) complete; all execution items open. |
+| 2026-09-26 | Owner decisions updated: Resend email (`RESEND_API_KEY`; VLY provider retired at cutover), Cloudflare Tunnel ingress + Access-protected dashboard, hostnames finalized, portability = restore state + secrets + Cloudflare routing. |
 
 ---
 

@@ -4,6 +4,12 @@
 > live deployment. The current Freebuff/Convex Cloud deployment remains the
 > production system of record until the cutover decision is made
 > (**OWNER DECISION REQUIRED**).
+>
+> **Confirmed decisions:** initial server `gman-02`; ingress via Cloudflare
+> Tunnel (TLS at the edge, WebSockets enabled, dashboard behind Cloudflare
+> Access); hostnames `schoolcore.ooflowdesk.com` / `schoolcore-api…` /
+> `schoolcore-dashboard…`; email via Resend (`RESEND_API_KEY`), with the
+> `VLY_EMAIL_OTP_API_KEY` provider retired at cutover.
 
 ---
 
@@ -52,7 +58,7 @@ Local: Bun scripts + verification suites in scripts/ (URL-parameterised)
 | --- | --- | --- |
 | VLY integration SDK (`@vly-ai/integrations`) | `src/lib/vly-integrations.ts`, `src/convex/phase6-ai/` | Must be replaced or disabled; token is VLY-specific |
 | VLY email OTP gateway | `src/convex/auth/emailOtp.ts` → `auth.freebuff.app/send_otp` | Replace with Resend (see EMAIL_RESEND_MIGRATION.md) |
-| Freebuff static hosting + managed build | deployment pipeline | Replaced by Docker + reverse proxy (SERVER_DEPLOYMENT_GUIDE) |
+| Freebuff static hosting + managed build | deployment pipeline | Replaced by Docker + Cloudflare Tunnel ingress (SERVER_DEPLOYMENT_GUIDE) |
 | Freebuff Keys UI / `convex env set` | secret management | Replaced by server env files/secret store (SECRET_MANAGEMENT_GUIDE) |
 | `vly-toolbar-readonly.tsx` | dev toolbar | Dev-only; exclude from self-host build |
 | `sst-env.d.ts`, orphan `convex/crons.ts` | legacy artifacts | Cleanup candidates (no importers) |
@@ -73,10 +79,15 @@ Local: Bun scripts + verification suites in scripts/ (URL-parameterised)
 
 ```
 Docker Compose stack (single VM, or VM per container on larger hosts)
+Cloudflare edge — TLS termination, WebSockets enabled,
+dashboard behind Cloudflare Access
+       │  proxied hostnames → <tunnel-id>.cfargotunnel.com
+       ▼
   ┌──────────────────────────────────────────────────────────────┐
-  │  reverse proxy (Traefik/Caddy/Nginx) — TLS termination        │
-  │    app.schoolcore.example    → app container (static dist/)   │
-  │    api.schoolcore.example    → convex backend container       │
+  │  cloudflared connector (outbound-only, gman-02)               │
+  │    schoolcore.ooflowdesk.com           → app container        │
+  │    schoolcore-api.ooflowdesk.com       → convex backend       │
+  │    schoolcore-dashboard.ooflowdesk.com → dashboard (Access)   │
   └──────────────────────────────────────────────────────────────┘
        │                                    │
        ▼                                    ▼
@@ -100,9 +111,14 @@ Key properties:
   [Convex self-hosting docs](https://docs.convex.dev/production/hosting/self-hosting)).
 - **Storage** stays inside Convex (self-hosted backend includes file storage);
   documents reference `storageId`s exactly as today.
+- **Ingress** via Cloudflare Tunnel: outbound-only `cloudflared` connector
+  on gman-02, TLS at the Cloudflare edge, WebSockets enabled; the dashboard
+  is additionally gated by Cloudflare Access. No inbound web ports, no
+  origin reverse proxy.
 - **Secrets** injected via environment variables from the server's secret
   store (no dotenvx, no `.env.keys`) — see SECRET_MANAGEMENT_GUIDE.md.
-- **Resend** replaces the VLY email gateway for all e-mail sending.
+- **Resend** replaces the VLY email gateway for all e-mail sending
+  (confirmed; `VLY_EMAIL_OTP_API_KEY` retires at cutover).
 - **No dotenvx / `.env.keys`** anywhere in the target stack.
 
 ---
@@ -112,7 +128,7 @@ Key properties:
 | # | Phase | Summary | Status |
 | --- | --- | --- | --- |
 | 0 | **Preparation** | Docs, scripts, plans, Resend abstraction plan, dotenvx-removal proposal | **DONE (this work)** |
-| 1 | **Environment provisioning** | Stand up VM, Docker, reverse proxy, TLS, secret store (SERVER_DEPLOYMENT_GUIDE) | Not started |
+| 1 | **Environment provisioning** | Stand up gman-02: Docker, cloudflared tunnel connector, edge TLS, secret store (SERVER_DEPLOYMENT_GUIDE) | Not started |
 | 2 | **Self-hosted Convex backend** | Deploy convex backend + dashboard containers; push schema from repo | Not started |
 | 3 | **Function parity** | `convex push` against self-hosted backend; run verification suites from `scripts/` | Not started |
 | 4 | **Email → Resend** | Implement provider abstraction + Resend adapter; set `RESEND_API_KEY`; verify OTP + comm queue | Not started (plan ready) |
@@ -144,7 +160,7 @@ current deployment; only Phase 6 touches live traffic.
 | CPU | 4+ vCPU |
 | RAM | 8–16 GB |
 | Disk | 100 GB+ SSD, with separate partition/volume for data + backups |
-| Network | Static IP, ports 80/443 open; outbound HTTPS (Resend, M-Pesa, SMS) |
+| Network | Outbound HTTPS (tunnel connector, Resend, M-Pesa, SMS); **no inbound web ports** — ingress is the Cloudflare Tunnel |
 | Extras | Off-site backup target (S3-compatible or second host), uptime monitor |
 
 ### Sizing notes
@@ -206,7 +222,7 @@ phase2/3, engines tests. All must pass before considering a release live.
 | Bad app release | `docker compose ... up -d app` with previous image tag (images retained locally per compose retention policy). Verify suites re-run. |
 | Bad function push | Re-push the previous git tag's functions (`git checkout <tag> && bunx convex push`). Schema pushes are append-only in practice; destructive schema changes require the data-rollback path below. |
 | Data corruption / bad import | Restore the Convex data volume from the most recent backup snapshot (SERVER_DEPLOYMENT_GUIDE §5), or re-import from the pre-migration export archive (README-migration §6 rollback). |
-| TLS/proxy failure | Certificates are re-issued from the ACME provider; configs are versioned in `deploy/` so `git revert` + redeploy restores the prior proxy state. |
+| Tunnel/edge failure | TLS lives at the Cloudflare edge (nothing to re-issue on origin). Restart or re-provision the cloudflared connector (container or `cloudflared service install <token>`); ingress/hostnames route via Cloudflare, so restoring the connector — or routing to a healthy host per the portability contract — restores service. |
 | Full-host loss | Re-provision from SERVER_DEPLOYMENT_GUIDE §2, restore data volume from off-site backup, redeploy app image, re-run validation. Target RTO: 2–4 h. |
 
 Rollback **never** touches the still-live Freebuff deployment during phases
@@ -229,13 +245,14 @@ completes.
 
 ---
 
-## 8. Remaining decisions before Phase 1
+## 8. Decision status (confirmed + remaining)
 
-| Decision | Owner | Notes |
+| Decision | Status | Notes |
 | --- | --- | --- |
-| Target VM / hosting provider | OWNER | Any Docker-capable Linux host works |
-| Domain name(s) for app + API | OWNER | Needed for TLS |
-| Email domain + Resend account tier | OWNER | FREE/PRO tiers per volume (EMAIL_RESEND_MIGRATION §6) |
+| Target VM / hosting provider | ✅ CONFIRMED | gman-02 (Docker-capable Linux host) |
+| Domain name(s) for app + API | ✅ CONFIRMED | schoolcore.ooflowdesk.com / -api / -dashboard, routed via Cloudflare Tunnel |
+| Email provider | ✅ CONFIRMED | Resend (`RESEND_API_KEY`); `VLY_EMAIL_OTP_API_KEY` retires at cutover |
+| Resend account tier | OWNER | FREE/PRO tiers per volume (EMAIL_RESEND_MIGRATION §6) |
 | Backup target (S3-compatible vs second host) | OWNER | SERVER_DEPLOYMENT_GUIDE §5 assumes either |
 | Cutover date & freeze window | OWNER | Phase 6 entry gate |
 | Whether VLY AI features ship in self-host v1 | OWNER | Or deferred/disabled (Self-hosting §1 table) |

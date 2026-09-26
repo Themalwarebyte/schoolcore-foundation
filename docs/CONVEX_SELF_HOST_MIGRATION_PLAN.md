@@ -221,20 +221,21 @@ the Owner signs off (**OWNER DECISION REQUIRED**).
 | 2 | Final export from source → archive | T+5 |
 | 3 | Import into target; structural validation | T+15 |
 | 4 | Functional suites against target | T+30 |
-| 5 | Switch DNS / reverse proxy to target (SERVER_DEPLOYMENT_GUIDE §4) | T+40 |
+| 5 | Switch Cloudflare routing to target: map the confirmed hostnames (`schoolcore.ooflowdesk.com` / `-api` / `-dashboard`) to the gman-02 tunnel (SERVER_DEPLOYMENT_GUIDE §4); check what `schoolcore.ooflowdesk.com` currently serves before flipping production (SELF_HOST_EXECUTION_CHECKLIST §7.3) | T+40 |
 | 6 | Post-cutover smoke: sign-in, attendance, invoice, announcement | T+45 |
 | 7 | Unfreeze announcement; monitor | T+60 |
 
 ### 6.3 Cutover rollback
 
-If any gate fails **before step 5 (DNS switch)**: abort; source Cloud
-deployment is untouched and still live. Re-attempt later.
+If any gate fails **before step 5 (Cloudflare routing switch)**: abort;
+source Cloud deployment is untouched and still live. Re-attempt later.
 
-If a problem is found **after** the DNS switch:
+If a problem is found **after** the Cloudflare routing switch:
 
 1. **Roll forward preferred:** fix-forward on self-host if the issue is
    code-level and small.
-2. **Roll back to Cloud:** re-point DNS to the Cloud deployment. Data written
+2. **Roll back to Cloud:** re-point Cloudflare routing (DNS/hostnames) to the
+   Cloud deployment — a routing change only, per the portability contract. Data written
    to self-host during the window (if any) is reconciled manually or
    sacrificed by re-freezing and re-exporting from Cloud (last-known-good
    Cloud data) — this is an **OWNER DECISION** at incident time.
