@@ -40,7 +40,10 @@ bunx convex dev --once     # follow the prompts to create/log in and link
 ## 3. Environment configuration
 
 All secrets are managed through the platform secret manager / the Convex
-deployment environment — **never committed to the repository**.
+deployment environment — **never committed to the repository**. For the
+future self-hosted deployment, secrets move to **server-managed environment
+configuration** (no dotenvx, no `.env.keys`) — see
+[`docs/SECRET_MANAGEMENT_GUIDE.md`](./SECRET_MANAGEMENT_GUIDE.md).
 
 **Frontend hosting environment** (build-time, `VITE_`-prefixed):
 
@@ -72,7 +75,8 @@ M-Pesa actions return a null config instead of throwing):
 | `SMS_API_KEY`          | SMS channel of the communications module                       |
 | `EMAIL_API_KEY`        | Email channel of the communications module                     |
 | `WHATSAPP_API_KEY`     | WhatsApp channel of the communications module                  |
-| `VLY_EMAIL_OTP_API_KEY`| Email delivery for OTP invitations/activation                  |
+| `VLY_EMAIL_OTP_API_KEY`| Email delivery for OTP invitations/activation (legacy; sunset at self-host cutover) |
+| `RESEND_API_KEY`       | **Future (self-host):** email via Resend for OTP + comm queue — see [`docs/EMAIL_RESEND_MIGRATION.md`](./EMAIL_RESEND_MIGRATION.md). Not read by code yet. |
 
 The platform integration key (`VLY_INTEGRATION_KEY`) is injected automatically
 by the platform — never set it by hand and never expose it to the client.
