@@ -12,6 +12,71 @@
 
 ---
 
+## 0. Provenance — Phase 6A rehearsal + Phase 6B auth gate
+
+| Check | Result |
+|---|---|
+| Source snapshot | `d1e982a8-8f2b-414f-9c2c-8933ef661959.zip` (Convex snapshot, 129 tables, 802 docs) |
+| Import | 673 application documents, **11 s** |
+| SHA256 | `ce49b9f1d1583d04eca9bc35afa9519fb9388575c592360a58b53f9c302a01a9` |
+| Table counts | **0 discrepancies** |
+| `_id` preservation | **IDENTICAL** (0 missing / 0 unexpected) |
+| `_creationTime` | **100% preserved** |
+| Relationship orphans | **0** |
+| Tenant isolation | **PASS** (`You do not have access to this school.`) |
+| Auth component data | **PRESENT** (12 accounts, 51 sessions, 66 refresh tokens) |
+| **Existing production password** | **PASS** — migrated account accepted the existing production password, application user resolved, tenant resolved, self-host JWT issued |
+| Anonymous exposure audit | **PASS** — 20 sensitive functions all blocked; no unauthenticated data return |
+| File storage | none in production |
+
+> **The migration compatibility question is closed.** The only remaining
+> cutover gate is the **Freebuff write-freeze mechanism** plus owner security
+> actions (§12).
+>
+> **Maintenance window is dominated by freeze coordination and cutover
+> verification, not the 11-second database import.**
+
+---
+
+## 12. Exact final cutover sequence
+
+Perform strictly in order. Do not reorder.
+
+| # | Step | Owner / Agent |
+|---|---|---|
+| 1 | **Rotate the compromised production password in Freebuff.** Never reuse the exposed value. | Owner |
+| 2 | **Delete `SEED_SECRET`** from Freebuff production env. | Owner |
+| 3 | **Remove `VLY_INTEGRATION_KEY`** from Freebuff env **and rotate/revoke at the VLY issuer.** | Owner |
+| 4 | Verify Freebuff PROD is healthy. | Owner |
+| 5 | **Enter the verified write-freeze / maintenance state** (§2). | Owner |
+| 6 | **Record the freeze timestamp.** | Owner |
+| 7 | Download a **NEW** Freebuff PROD backup — *after* the password rotation and freeze. The Phase 6A snapshot **must not** be reused. | Owner |
+| 8 | Save to `E:\AI-Development\Backups\SchoolCore\production\final\` | Owner |
+| 9 | Calculate SHA256. | Owner |
+| 10 | Record the download timestamp. | Owner |
+| 11 | Inspect snapshot structure and per-table counts; confirm 129 tables and auth component coverage. | Agent |
+| 12 | Transfer to `/opt/schoolcore/backups/migration-rehearsal/` (mode 600, root). | Agent |
+| 13 | **Verify SHA256 matches** — stop if it differs. | Agent |
+| 14 | Create the `pre-production-cutover-<timestamp>` self-host backup (§4). | Agent |
+| 15 | Isolate SchoolCore public ingress as required. | Agent |
+| 16 | Import the final snapshot with replacement semantics (§5). | Agent |
+| 17 | Run all acceptance gates (§6). | Agent |
+| 18 | Start SchoolCore public services — **only after every gate passes.** | Agent |
+| 19 | **Owner acceptance declared.** | Owner |
+| 20 | *Only now* decide Freebuff archival / decommission. | Owner |
+
+### Ordering dependencies — do not skip
+
+- **Step 1 before step 7.** The final snapshot must contain the *replacement*
+  password hash. A snapshot taken earlier carries the exposed hash.
+- **Step 5 before step 7.** The backup must represent the last authoritative
+  state, so no writes may occur between freeze and download.
+- **Step 17 before step 18.** Public ingress must not open until every gate passes.
+- **Step 19 before step 20.** Freebuff stays the live rollback target until
+  acceptance; it becomes a fallback archive only afterwards.
+
+---
+
 ## 0. Known facts from the rehearsal
 
 | Fact | Value |
@@ -35,13 +100,16 @@
 ## 1. Preconditions (all must be true before starting)
 
 - [ ] Owner has issued the explicit **GO**
-- [ ] Write-freeze mechanism in place (§2) and **verified**
-- [ ] Existing-credential migration test **PASSED** (Phase 6B gate)
+- [ ] Write-freeze mechanism in place (§2) and **verified** — this is the primary remaining gate
+- [x] Existing-credential migration test **PASSED** (Phase 6B)
+- [ ] Compromised production password **rotated in Freebuff** (step 1 below)
 - [ ] `SEED_SECRET` removed from Freebuff production
+- [ ] `VLY_INTEGRATION_KEY` removed from Freebuff **and revoked at the issuer**
 - [ ] Git history purge completed and force-pushed (§7)
 - [ ] Resend sending domain verified, or email formally deferred
 - [ ] Maintenance window agreed and communicated to school users
 - [ ] Local workstation backup of Freebuff PROD confirmed present
+- [ ] At least one encrypted off-site backup copy exists
 
 ---
 

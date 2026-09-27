@@ -1,9 +1,11 @@
 # Migration Status — Live Checklist
 
-> **Status:** **PHASE 5B COMPLETE** — SchoolCore application deployed and
-> password authentication verified on the self-hosted infrastructure.
-> The Freebuff/Convex Cloud deployment remains **live and untouched** — no
-> production data migrated, no cutover.
+> **Status:** **PHASE 6B AUTH GATE CLOSED** - the Freebuff to self-host
+> migration is proven end-to-end against a real PROD snapshot, including an
+> **existing production password**. Remaining cutover blockers are
+> operational and security items, not migration compatibility.
+> Convex Cloud / Freebuff production remains **live and untouched** - no
+> permanent data migration, no cutover.
 >
 > **Rules in force:** no data migration yet · no production modification · no
 > Convex Cloud changes · no secret values in the repo · no destructive
@@ -37,10 +39,10 @@
 | 1 | Repository security items below | ☐ Not started (dotenvx key confirmed orphaned) |
 | 2 | Infrastructure (gman-02, Docker, firewall, tunnel) | ✅ **DONE** |
 | 3 | Self-hosted Convex (empty backend + PostgreSQL 17) | ✅ **DONE** |
-| 4 | Data migration (rehearsal → final) | ☐ Not started — **Phase 5B used synthetic TEST data only** |
+| 4 | Data migration | REHEARSED against a real Freebuff PROD snapshot - final import pending cutover |
 | 5 | Application verification | ✅ **DONE** (Phase 5A code + Phase 5B deployment) |
-| 6 | Email migration (Resend) | 🟡 Adapter built; **EMAIL DOMAIN VERIFICATION PENDING** |
-| 7 | Cutover | ☐ Not started |
+| 6 | Email migration (Resend) | PARTIAL - EMAIL DELIVERY NOT PRODUCTION READY |
+| 7 | Cutover | BLOCKED - write-freeze + owner security actions |
 
 ---
 
@@ -272,6 +274,45 @@ Reference: [`CONVEX_SELF_HOST_MIGRATION_PLAN.md`](./CONVEX_SELF_HOST_MIGRATION_P
 - [ ] Generate `JWT_PRIVATE_KEY` + `JWKS` **on gman-02** and set them on the self-hosted deployment through the authenticated Convex CLI. Never in this repo, never in chat. Procedure: `SELF_HOSTING_GUIDE.md`.
 
 ---
+
+
+---
+
+## 6A / 6B. Migration verification results
+
+All checks executed against a **real Freebuff PROD snapshot**
+(`d1e982a8-...zip`, sha256 `ce49b9f1...a01a9`).
+
+| Gate | Result |
+|---|---|
+| PHASE 6A rehearsal | **PASS** |
+| Real PROD snapshot import | **PASS** (673 docs, 11 s) |
+| Table counts | **PASS** - 0 discrepancies |
+| `_id` preservation | **PASS** - identical sets |
+| `_creationTime` preservation | **PASS** - 100% |
+| Relationship integrity | **PASS** - 0 orphans |
+| Tenant isolation | **PASS** - cross-tenant blocked |
+| Auth component migration | **PASS** - accounts/sessions/tokens |
+| **Existing production password migration** | **PASS** |
+| Application user resolution | **PASS** |
+| Tenant resolution | **PASS** |
+| Self-host JWT issuance | **PASS** |
+| Anonymous public-data exposure | **PASS** - 0 endpoints exposed data |
+| Clean-state restore | **PASS** - 0 production records remain |
+
+No email address, password, hash, JWT, refresh token, or personal record
+content is recorded in this document.
+
+### Remaining blockers (operational / security, not migration)
+
+1. Freebuff **write-freeze mechanism** unverified - primary cutover gate
+2. Compromised production password **rotation in Freebuff** (before final backup)
+3. `SEED_SECRET` removal from Freebuff production
+4. `VLY_INTEGRATION_KEY` removal + issuer-side revocation
+5. Git history purge (all 3 branches + 22 tags)
+6. Resend sending domain verification
+7. Off-site backup provider selection
+8. Owner maintenance window and explicit GO
 
 ## Changelog
 
