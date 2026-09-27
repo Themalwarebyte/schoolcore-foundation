@@ -1,12 +1,107 @@
 # Phase 5B Deployment Handoff
 
-> **Audience:** Kilo (deployment agent) on `gman-02`.
-> **Scope:** deploy SchoolCore to the existing EMPTY self-hosted Convex backend.
-> **Not in scope:** migrating Convex Cloud production data, cutover, and the
-> communications email channel (still a stub — see §10).
+> **STATUS: DEPLOYED (2026-09-27).** The approved commit
+> `df14e982ac4bda6ae704f0b737a79addcc2a66e8` is live on `gman-02`.
+> Password authentication is verified end-to-end against synthetic test data.
+> **No production data was migrated and Convex Cloud was not modified.**
 >
-> Convex Cloud / Freebuff production **remains live and must not be modified**.
-> This handoff targets the self-hosted deployment only.
+> Sections A–H below are the original pre-deployment instructions, retained for
+> reference and for future-server reuse. **Section L is the deployment record.**
+
+---
+
+## L. Deployment record (2026-09-27)
+
+### Deployed source
+| Item | Value |
+|---|---|
+| Commit | `df14e982ac4bda6ae704f0b737a79addcc2a66e8` |
+| Branch | `phase5-selfhost-readiness` |
+| Base | `d4cc5b423082a863b9e5fa385e7d58ebbdc9a828` |
+| Server location | `/opt/schoolcore/app/source/schoolcore` |
+
+### Convex deployment
+- Dry-run: **clean** — no index deletions, schema validation passed
+- Functions/schema deployed to `https://schoolcore-api.ooflowdesk.com`
+- Backend: **PostgreSQL 17.11**, `Connected to Postgres database: schoolcore`, **0 SQLite files**
+- Frontend/CodeGen: application tables created (129 objects)
+
+### Convex Auth (self-hosted)
+- `JWT_PRIVATE_KEY` + `JWKS`: **newly generated on gman-02**, RS256. Set on the
+  deployment via `convex env set --from-file` (a multi-line PEM cannot be passed
+  as a CLI argument). Generation files were mode 600 and shredded.
+- `CONVEX_SITE_URL`: Convex **built-in**; cannot be set with `convex env set`
+  (`EnvVarNameForbidden`). It is derived by the backend from
+  `CONVEX_SITE_ORIGIN=https://schoolcore-site.ooflowdesk.com`.
+- OIDC issuer resolves to `https://schoolcore-site.ooflowdesk.com`; JWKS serves
+  the RSA key. **No Freebuff dependency.**
+- JWT lifetime: **60 minutes**.
+
+### Frontend
+- Image `schoolcore-frontend:df14e98` (multi-stage, digest-pinned bases)
+- Service `schoolcore-frontend`, internal port 80, `schoolcore-net`, **no host port**
+- `read_only` rootfs, `cap_drop: ALL` + only `CHOWN/SETUID/SETGID/DAC_OVERRIDE`
+  (nginx needs these to chown its cache dirs and drop privileges)
+- **Fixed during deployment:** nginx `add_header` does not inherit into
+  `location` blocks that declare their own, and the SPA fallback internally
+  redirects to `/index.html` — so the security headers were silently dropped.
+  They are now repeated per-location and confirmed served.
+- `https://schoolcore.ooflowdesk.com` → **HTTP 200**
+
+### Controlled TEST data
+Created with the application's own `seed:seedAll` (the only supported bootstrap
+path) using a generated `SEED_SECRET` and a generated test admin password.
+**All synthetic**: 2 schools, 80 students, 11 staff, 67 guardians. No real
+personal, financial, health or examination data. Credentials live only in
+`/opt/schoolcore/deploy/.env` (mode 600).
+
+### Password authentication — verified
+| Check | Result |
+|---|---|
+| Correct password | **ACCEPTED**, JWT issued |
+| `auth:isAuthenticated` | `true` |
+| `users:currentUser` | resolves to the test admin |
+| Session persistence | **YES** across repeat calls |
+| Wrong password | **REJECTED** |
+| Logout | **OK**; client token cleared → `isAuthenticated: false` |
+| Freebuff dependency | **NONE** |
+
+**Finding — logout does not revoke the JWT server-side.** After `auth:signOut`
+the client is anonymous, but replaying the pre-logout token still authenticates.
+This is inherent to stateless JWT auth (the token is self-contained), not a
+configuration defect. Exposure is bounded by the **60-minute** token lifetime.
+Anyone needing true revocation must shorten the token lifetime or add
+server-side session revocation.
+
+### Email status
+**APPLICATION READY · EMAIL DOMAIN VERIFICATION PENDING.**
+`RESEND_API_KEY` is configured but `RESEND_FROM_EMAIL` is not, so the code falls
+back to Resend's onboarding address (owner-mailbox only). No email was sent.
+This does not affect password authentication.
+
+### Backup
+`/opt/schoolcore/backups/post-app-deploy-20260927-172651/` — logical
+`pg_dump` (1.6 MB, verified), source commit, row counts, redacted env keys,
+image manifest, TEST-data identifiers. The Phase 4 baseline backup is preserved.
+
+### Rollback
+```bash
+D=/opt/schoolcore/deploy/docker-compose.convex.yml
+docker compose -f $D stop schoolcore-frontend                 # frontend only
+docker compose -f $D stop schoolcore-frontend convex-backend convex-dashboard cloudflared
+docker compose -f $D down                                    # keeps volumes
+```
+None of these touch `/srv/platform` (`caddy`, `convex` projects), OMV,
+Tailscale, Syncthing, the firewall, or Convex Cloud.
+
+### Outstanding before production cutover
+1. Rotate/remove the seeded demo accounts (their passwords are in the README)
+2. Verify a Resend sending domain and set `RESEND_FROM_EMAIL`
+3. Remove `SEED_SECRET` and the bootstrap admin variables from the deployment
+4. Migrate real production data (Phase 6) — **not started**
+5. Git history purge — still mandatory
+6. Cloudflare Access before any dashboard route
+7. Review the 60-minute JWT logout window
 
 ---
 

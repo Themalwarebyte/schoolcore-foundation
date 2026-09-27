@@ -1,9 +1,9 @@
 # Migration Status — Live Checklist
 
-> **Status:** PHASE 4 COMPLETE (empty self-hosted Convex infrastructure live) ·
-> PHASE 5A IN PROGRESS (application/auth/frontend readiness).
-> The Freebuff/Convex Cloud deployment remains **live and untouched** — no data
-> migration, no cutover.
+> **Status:** **PHASE 5B COMPLETE** — SchoolCore application deployed and
+> password authentication verified on the self-hosted infrastructure.
+> The Freebuff/Convex Cloud deployment remains **live and untouched** — no
+> production data migrated, no cutover.
 >
 > **Rules in force:** no data migration yet · no production modification · no
 > Convex Cloud changes · no secret values in the repo · no destructive
@@ -37,9 +37,9 @@
 | 1 | Repository security items below | ☐ Not started (dotenvx key confirmed orphaned) |
 | 2 | Infrastructure (gman-02, Docker, firewall, tunnel) | ✅ **DONE** |
 | 3 | Self-hosted Convex (empty backend + PostgreSQL 17) | ✅ **DONE** |
-| 4 | Data migration (rehearsal → final) | ☐ Not started |
-| 5 | Application verification | 🔵 **Phase 5A in progress** (code readiness) |
-| 6 | Email migration (Resend) | 🔵 Adapter built in Phase 5A; not yet provisioned |
+| 4 | Data migration (rehearsal → final) | ☐ Not started — **Phase 5B used synthetic TEST data only** |
+| 5 | Application verification | ✅ **DONE** (Phase 5A code + Phase 5B deployment) |
+| 6 | Email migration (Resend) | 🟡 Adapter built; **EMAIL DOMAIN VERIFICATION PENDING** |
 | 7 | Cutover | ☐ Not started |
 
 ---
@@ -281,6 +281,7 @@ Reference: [`CONVEX_SELF_HOST_MIGRATION_PLAN.md`](./CONVEX_SELF_HOST_MIGRATION_P
 | 2026-09-26 | Owner decisions updated: Resend email (`RESEND_API_KEY`; VLY provider retired at cutover), Cloudflare Tunnel ingress + Access-protected dashboard, hostnames finalized, portability = restore state + secrets + Cloudflare routing. |
 | 2026-09-27 | **Phase 4 complete** — empty self-hosted Convex on gman-02: PostgreSQL 17.11, Cloudflare Tunnel connected, API + site hostnames live, dashboard private/unrouted, restore test passed. |
 | 2026-09-27 | **Phase 5A** — branch `phase5-selfhost-readiness` off `d4cc5b4`. Opt-in Freebuff provider, Resend email adapter, frontend container + nginx config, `.env.example` corrected. Dashboard Access deferred by Owner decision (billing); dashboard stays unrouted. |
+| 2026-09-27 | **Phase 5B DEPLOYED** — commit `df14e98` deployed to gman-02. Convex functions/schema deployed to the self-hosted backend (PostgreSQL, no SQLite). Convex Auth configured with self-generated RS256 keys. `schoolcore-frontend` built and serving; `schoolcore.ooflowdesk.com` returns HTTP 200. Password auth verified end-to-end with controlled synthetic test data. Post-deployment backup created. **No production data migrated; Convex Cloud untouched.** |
 
 ---
 
