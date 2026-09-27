@@ -1,0 +1,51 @@
+# Keep build context minimal and secret-free.
+#
+# Anything matched here never enters the Docker build context, so it cannot
+# reach any build stage or the final image.
+
+# --- secrets (critical) -------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+.env.keys
+
+# --- dependencies (rebuilt inside the image from the lockfile) ---------
+node_modules
+.bun
+
+# --- build output (produced inside the image) --------------------------
+dist
+dist-ssr
+build
+
+# --- version control / CI ---------------------------------------------
+.git
+.gitignore
+.github
+.vscode
+.idea
+
+# --- agent / worktree scratch -----------------------------------------
+.kilo
+
+# --- documentation and scripts not needed to build the app -------------
+docs
+*.md
+!README.md
+scripts
+
+# --- backups and runtime artefacts -------------------------------------
+backups
+logs
+storage
+tmp
+
+# --- misc --------------------------------------------------------------
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db

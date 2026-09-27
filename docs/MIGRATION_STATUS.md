@@ -1,9 +1,9 @@
 # Migration Status — Live Checklist
 
-> **Status:** PREPARATION COMPLETE · EXECUTION NOT STARTED. This is the
-> working checklist for the Cloud → self-hosted migration. Update it as each
-> item completes. Documentation only — nothing here has been executed; the
-> Freebuff/Convex Cloud deployment remains live and untouched.
+> **Status:** PHASE 4 COMPLETE (empty self-hosted Convex infrastructure live) ·
+> PHASE 5A IN PROGRESS (application/auth/frontend readiness).
+> The Freebuff/Convex Cloud deployment remains **live and untouched** — no data
+> migration, no cutover.
 >
 > **Rules in force:** no data migration yet · no production modification · no
 > Convex Cloud changes · no secret values in the repo · no destructive
@@ -11,8 +11,10 @@
 >
 > Confirmed decisions and the host-specific execution runbook live in
 > [`SELF_HOST_EXECUTION_CHECKLIST.md`](./SELF_HOST_EXECUTION_CHECKLIST.md)
-> (schoolcore.ooflowdesk.com on gman-02 — **Cloudflare Tunnel** ingress,
-> dashboard behind **Cloudflare Access**).
+> (schoolcore.ooflowdesk.com on gman-02 — **Cloudflare Tunnel** ingress).
+> The Convex dashboard is **intentionally unrouted and private**; Cloudflare
+> Access is deferred by Owner decision (billing/setup) and MUST be in place
+> before any dashboard route is ever created.
 
 ---
 
@@ -32,12 +34,12 @@
 | Phase | Name | Status |
 | --- | --- | --- |
 | 0 | Preparation (docs, plans, audits) | ✅ **DONE** |
-| 1 | Repository security items below | ☐ Not started |
-| 2 | Infrastructure | ☐ Not started |
-| 3 | Self-hosted Convex | ☐ Not started |
+| 1 | Repository security items below | ☐ Not started (dotenvx key confirmed orphaned) |
+| 2 | Infrastructure (gman-02, Docker, firewall, tunnel) | ✅ **DONE** |
+| 3 | Self-hosted Convex (empty backend + PostgreSQL 17) | ✅ **DONE** |
 | 4 | Data migration (rehearsal → final) | ☐ Not started |
-| 5 | Application verification | ☐ Not started |
-| 6 | Email migration (Resend) | ☐ Not started |
+| 5 | Application verification | 🔵 **Phase 5A in progress** (code readiness) |
+| 6 | Email migration (Resend) | 🔵 Adapter built in Phase 5A; not yet provisioned |
 | 7 | Cutover | ☐ Not started |
 
 ---
@@ -226,12 +228,59 @@ Reference: [`CONVEX_SELF_HOST_MIGRATION_PLAN.md`](./CONVEX_SELF_HOST_MIGRATION_P
 
 ---
 
+## 5A. Application / auth / frontend code readiness (Phase 5A)
+
+> Repository-only phase. Nothing was deployed. Convex Cloud untouched.
+> Branch: `phase5-selfhost-readiness` (based on `origin/main` `d4cc5b4`).
+
+### 5A.1 Self-host auth strategy
+- [x] Standard Convex Auth provider stays first, `domain: process.env.CONVEX_SITE_URL`.
+- [x] Freebuff `customJwt` provider made **opt-in** (`src/convex/auth/freebuff.ts`).
+- [x] **Deployment requirement discovered:** the Convex Auth CLI requires every env var referenced anywhere in the auth-config import graph to be *set* in the target deployment, even when the code guards for absence. This is transitive and is not evaded by moving the reference or by computed lookup. **Self-host must set `VLY_CONVEX_AUTH_ISSUER` to an empty value** to satisfy the CLI while keeping the provider unregistered.
+- [ ] Convex Cloud: confirm `VLY_CONVEX_AUTH_ISSUER` is still set to the real issuer (federated sign-in must keep working until cutover).
+- [ ] Self-host: `npx convex env set VLY_CONVEX_AUTH_ISSUER ""` (empty).
+
+### 5A.2 Resend email
+- [x] `src/convex/emailProvider.ts` created — Resend-first, legacy VLY fallback, explicit failure when unconfigured.
+- [x] `auth/emailOtp.ts` transport swapped; OTP generation, 6-digit length, 15-min expiry, provider id `email-otp` and verification behaviour unchanged.
+- [x] No OTP value or Resend error body (may echo recipients) written to logs.
+- [x] `RESEND_FROM_EMAIL` supported; documented that a **verified sending domain is required** for real recipients (fallback is Resend onboarding, owner-mailbox-only).
+- [ ] Owner: provision Resend domain + set `RESEND_FROM_EMAIL` / `RESEND_API_KEY` on the self-host deployment.
+- [ ] Communications-queue email channel (`phase6/communications.ts`) is still a **stub** — wiring it to the provider is deliberately deferred, see `EMAIL_RESEND_MIGRATION.md` §2.
+
+### 5A.3 Frontend container
+- [x] `Dockerfile.frontend` (multi-stage, bun build → nginx runtime), base images pinned **by digest**.
+- [x] `deploy/nginx-frontend.conf` — SPA fallback, long cache on hashed assets, `index.html` explicitly no-cache, `/healthz`, dotfiles denied, security headers.
+- [x] `.dockerignore` excludes `.env*`, keys, backups, docs, `node_modules` — no secret can enter the build context.
+- [x] Service name `schoolcore-frontend`, internal port 80, attaches to `schoolcore-net`; **no host port**.
+- [ ] Build the image and start it (Phase 5B). `schoolcore.ooflowdesk.com` currently returns the expected 502 because this container does not exist yet.
+
+### 5A.4 Build variables
+- [x] Frontend consumes only `VITE_CONVEX_URL`, `VITE_VLY_APP_ID`, `VITE_VLY_MONITORING_URL`. No new `VITE_` variable invented.
+- [x] Built bundle scanned: no `RESEND_API_KEY`, `JWT_PRIVATE_KEY`, `JWKS`, `INSTANCE_SECRET`, `POSTGRES_PASSWORD`, admin key, tunnel token or VLY key. No `127.0.0.1`.
+- [x] `VITE_CONVEX_URL` must be the **backend** (3210) origin, never the `.convex.site`/site origin — the Convex client throws for `.convex.site`. Documented at the call site.
+
+### 5A.5 Local validation (this phase)
+- [x] `bun install --frozen-lockfile` — 405 packages, `bun.lock` unchanged.
+- [x] Convex codegen generated from a **local Docker deployment** (no production, no gman-02).
+- [x] `tsc --noEmit` app + convex: clean.
+- [x] `bun run lint`: 0 errors (48 pre-existing warnings).
+- [x] `bun run build`: success.
+- [ ] Verification scripts (`scripts/*.ts`) not run — they need a seeded deployment and must never be pointed at production.
+
+### 5A.6 Auth key generation (NOT done — procedure only)
+- [ ] Generate `JWT_PRIVATE_KEY` + `JWKS` **on gman-02** and set them on the self-hosted deployment through the authenticated Convex CLI. Never in this repo, never in chat. Procedure: `SELF_HOSTING_GUIDE.md`.
+
+---
+
 ## Changelog
 
 | Date | Change |
 | --- | --- |
 | 2026-09-26 | Checklist created. Phase 0 (preparation) complete; all execution items open. |
 | 2026-09-26 | Owner decisions updated: Resend email (`RESEND_API_KEY`; VLY provider retired at cutover), Cloudflare Tunnel ingress + Access-protected dashboard, hostnames finalized, portability = restore state + secrets + Cloudflare routing. |
+| 2026-09-27 | **Phase 4 complete** — empty self-hosted Convex on gman-02: PostgreSQL 17.11, Cloudflare Tunnel connected, API + site hostnames live, dashboard private/unrouted, restore test passed. |
+| 2026-09-27 | **Phase 5A** — branch `phase5-selfhost-readiness` off `d4cc5b4`. Opt-in Freebuff provider, Resend email adapter, frontend container + nginx config, `.env.example` corrected. Dashboard Access deferred by Owner decision (billing); dashboard stays unrouted. |
 
 ---
 
