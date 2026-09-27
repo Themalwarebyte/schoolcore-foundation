@@ -1,7 +1,7 @@
 {
-  "name": "freebuff.com application",
-  "short_name": "freebuff.com",
-  "description": "freebuff.com application",
+  "name": "SchoolCore",
+  "short_name": "SchoolCore",
+  "description": "SchoolCore - school management for schools, staff, students and parents.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
