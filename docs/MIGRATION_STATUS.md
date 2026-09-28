@@ -343,6 +343,27 @@ application code: no `PLATFORM_ADMIN_EMAIL` bootstrap credential was created or
 restored, and no new environment variable was introduced. It must never be used
 as a sender address, as a student/guardian/staff address, or as a credential.
 
+
+### Phase 6C - encrypted off-site backup (Google Drive)
+
+| Item | Status |
+|---|---|
+| Provider | **Google Drive** (encrypted off-site tier) |
+| Account | dedicated backup account, owner-controlled |
+| Remote / scope | `schoolcore-drive` / `drive.file` (files it creates only) |
+| Folder / repository | `SchoolCore-Backups` / `restic` sub-path |
+| Restic | **0.18.0**, repository encrypted, password-wrapped master key |
+| Restic password | generated on gman-02, root:root 0600, **off-server copy verified** |
+| First snapshot | created and readable; `restic check` **no errors** |
+| Restore test | **PASS** - disposable PostgreSQL restore, plaintext shredded |
+| Retention | 14 daily / 8 weekly / 12 monthly / 2 yearly, Restic-managed |
+| Schedule | systemd timer 02:30 Europe/London (04:30 EAT during BST), Persistent=true |
+| Health check | **HEALTHY** |
+| Plaintext artefacts on Drive | **none** - only the encrypted repository is stored |
+
+Backup never requires application downtime: the PostgreSQL logical dump runs
+against the live container while the SchoolCore stack keeps serving.
+
 ## Changelog
 
 | Date | Change |

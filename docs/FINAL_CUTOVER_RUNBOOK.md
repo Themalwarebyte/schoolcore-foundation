@@ -377,3 +377,29 @@ even after logout. Refresh/session state is managed separately. Revisit
 | `VLY_INTEGRATION_KEY` | **SAFE TO REMOVE** from this app's env — the only reader (`src/lib/vly-integrations.ts`) is never imported. Also **rotate/revoke at the VLY issuer**, since removal from the app does not invalidate it there. |
 
 Both were visible in an Owner screenshot. Never displayed or reproduced here.
+
+---
+
+## 13. Off-site backup position (Phase 6C complete)
+
+Encrypted off-site backup is **live and restore-tested**, so cutover no longer
+depends on the single local host.
+
+| Item | Value |
+|---|---|
+| Provider / remote | Google Drive, `schoolcore-drive`, scope `drive.file` |
+| Repository | `SchoolCore-Backups/restic`, Restic-encrypted |
+| Integrity | `restic check` reports no errors |
+| Restore test | **PASS** (disposable database, live environment untouched) |
+| Retention | 14 daily / 8 weekly / 12 monthly / 2 yearly |
+| Schedule | 02:30 Europe/London = 04:30 EAT during BST, `Persistent=true` |
+| Recovery password | held on gman-02 **and** an off-server owner copy |
+
+**This materially improves the cutover position:** if `gman-02` is lost or
+rolled back, a verified encrypted copy of the database and configuration
+already exists off-site. The rollback plan in section 11 gains a restoration
+source that does not depend on the host being intact.
+
+**Still required before the final import:** the compromised production
+password must be rotated, and the final PROD snapshot must be downloaded
+**after** that rotation so the archive carries the replacement hash.

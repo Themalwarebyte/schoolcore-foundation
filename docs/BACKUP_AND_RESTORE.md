@@ -154,7 +154,58 @@ npx convex import <snapshot.zip>          # replacement semantics — never --ap
 The Phase 6A rehearsal snapshot is **not** a cutover snapshot. The final cutover uses a
 freshly downloaded PROD snapshot taken after the write freeze and after password rotation.
 
-## 11. Related
+## 11. Operational status
+
+Verified 2026-09-27/28 against the live repository.
+
+| Item | Value |
+|---|---|
+| Repository id | `8ec26daf73…` (restic v2 repo) |
+| First snapshot | `7490fcbf` — 2026-09-28 14:47 BST, host `gman-02` |
+| Snapshot tags | `schoolcore, automated, postgres, gman-02` |
+| Snapshot size | 567.458 KiB |
+| Upload duration | 42 s (local dump + validate + checksum + upload, 69 s total) |
+| `restic check` | **no errors were found** |
+| Restore test | **PASS** — checksums verified, dump validated, restored into a **disposable** PostgreSQL container (5 tables, 3 182 document rows), plaintext shredded afterwards |
+| Retention | **applied** — 14 daily / 8 weekly / 12 monthly / 2 yearly, Restic-managed |
+| Scheduled run | timer `enabled` + `active`, `Persistent=true` |
+| Next run | **02:30 Europe/London** (+ up to 300 s randomised) |
+| **Nairobi mapping** | 02:30 London = **04:30 EAT** during BST; **05:30 EAT** during GMT |
+| Health check | **HEALTHY** — local fresh, Drive reachable, off-site age under 36 h |
+
+### Encryption verification
+
+Restic stores `config` in plaintext **by design**; confidentiality comes from the
+master key, which is wrapped by a scrypt key derived from the repository
+password. Verified on the Drive objects:
+
+- Only `restic/` exists at the Drive folder top level — **no plaintext backup
+  artefacts** outside the repository
+- A sampled data pack begins `3e b5 d9 b1 1a 2c 29 81 …` (high-entropy
+  ciphertext, not ASCII)
+- The plaintext marker `PostgreSQL database dump` occurs **0** times in the pack
+
+### Off-server recovery copy — MANDATORY
+
+The Restic repository password is stored at
+`/opt/schoolcore/secrets/restic-password` (root:root, 0600). A verified
+copy exists on the owner workstation at
+`E:\AI-Development\Backups\SchoolCore\recovery\restic-password`
+(SHA-256 matched at transfer time).
+
+> **Loss of this password = permanent loss of the encrypted repository.** The
+> rclone OAuth token alone cannot decrypt it, and the password alone cannot
+> reach it. Both are required, and they are stored separately.
+
+### Operational notes
+
+- If a backup is interrupted on Drive, a **stale restic lock** can make the
+  repository appear unreachable. `backup-health.sh` detects and clears locks it
+  finds; if a lock is genuinely active, `restic unlock` is the manual step.
+- `backup-health.sh` exits non-zero when the newest off-site snapshot is older
+  than **36 hours**.
+
+## 12. Related
 
 - `docs/FINAL_CUTOVER_RUNBOOK.md` — cutover sequence, rollback, acceptance gates
 - `docs/MIGRATION_STATUS.md` — phase status
