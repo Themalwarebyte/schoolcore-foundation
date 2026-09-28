@@ -11,10 +11,17 @@
 |---|---|---|---|
 | 1. Server-local | `gman-02` → `/opt/schoolcore/backups/<UTC-timestamp>/` | PostgreSQL logical dump, approved Convex snapshots, manifests, Compose config, restore notes | root-only (0700) |
 | 2. Workstation | Windows dev workstation | Final PROD snapshot, pre-purge Git archive, runbooks | Operator-controlled |
-| 3. **Off-site** | Cloudflare R2 bucket `schoolcore-backups` | Restic-encrypted repository at prefix `schoolcore-backups/schoolcore/restic` | **Client-side AES-256 encryption + private bucket** |
+| 3. **Off-site** | **Google Drive** — account `offsitebackup1@gmail.com`, folder `SchoolCore-Backups` | Restic-encrypted repository at `rclone:schoolcore-drive:SchoolCore-Backups/restic` | **Client-side AES-256 encryption** |
 
 **Raw unencrypted uploads are never used.** Everything in tier 3 passes through Restic
-encryption before it leaves the server.
+encryption before it leaves the server. The Restic repository is the only thing written
+to Drive; PostgreSQL dumps, OAuth material and the repository password are never
+uploaded in the clear.
+
+> **Account roles are strictly separated**
+> - `venturesgman@gmail.com` — **admin/operations mailbox** (Resend recipient, operational contact). **Never a backup target.**
+> - `offsitebackup1@gmail.com` — **off-site backup account only.** Used for nothing else.
+> - `SchoolCore <noreply@mail.ooflowdesk.com>` — outbound sender, never a backup target.
 
 ## 2. What is backed up
 
@@ -28,27 +35,34 @@ production-snapshot directories** · the pre-purge Git archive (secret-bearing �
 private/offline, never uploaded).
 
 Secrets are **not** in the standard backup. A full recovery needs both the Restic
-repository password *and* the R2 credentials; see §6.
+repository password *and* the Google OAuth config; see §6.
 
 ## 3. Restic repository
 
 | Property | Value |
 |---|---|
-| Tool | Restic **0.18.0** (Debian `restic` package) |
-| Backend | S3 → Cloudflare R2, `AWS_ENDPOINT_URL=https://<ACCOUNT_ID>.r2.cloudflarestorage.com` |
-| Repository | `s3:<endpoint>/schoolcore-backups/schoolcore/restic` |
-| Bucket | `schoolcore-backups` — **private**, no public dev URL, no custom public domain |
-| Credential scope | Object Read & Write, **scoped to that single bucket only** |
-| Encryption | Client-side, AES-256, key derived from the repository password |
+| Tool | Restic **0.18.0** (Debian package) |
+| Transport | **rclone v1.60.1** → Google Drive backend |
+| rclone remote | `schoolcore-drive` |
+| Google account | `offsitebackup1@gmail.com` (backup use only) |
+| Drive folder | `SchoolCore-Backups` |
+| Repository | `rclone:schoolcore-drive:SchoolCore-Backups/restic` |
+| rclone config | `/opt/schoolcore/secrets/rclone.conf` (600 root), referenced via `RCLONE_CONFIG` |
+| Authentication | Google OAuth (headless). **The account password is never requested or stored.** |
+| Encryption | Client-side, AES-256, key derived from the Restic repository password |
 
-R2 credentials alone cannot decrypt the repository; the Restic repository password
-alone cannot reach it. **Both are required, and they are stored separately.**
+The rclone OAuth config alone cannot decrypt the repository; the Restic repository
+password alone cannot reach it. **Both are required, and they are stored separately.**
+
+**Drive scope:** limited to files created/managed by this backup integration
+(`drive.scope=drive`, the minimum that reliably supports Restic's object model).
+No unrelated Drive content is browsed or inspected.
 
 ## 4. Retention
 
-Restic manages retention itself. **No R2 lifecycle rules and no Bucket Lock are
-configured on this prefix** — lifecycle deletion would fight Restic's `forget`/`prune`,
-and object lock would break pruning.
+Restic manages retention itself. **No independent Google Drive deletion policy is
+configured** — a Drive-side delete rule would corrupt the Restic repository by removing
+objects Restic still tracks.
 
 ```
 --keep-daily 14   --keep-weekly 8   --keep-monthly 12   --keep-yearly 2
@@ -57,7 +71,7 @@ and object lock would break pruning.
 Applied automatically after every successful upload, with `--prune`.
 
 **Later enhancement (not implemented):** an `IMMUTABLE ARCHIVE` design using a
-*second* bucket/prefix plus Bucket Lock retention for periodic standalone encrypted
+*separate* Drive folder plus a retention policy for periodic standalone encrypted
 archives. This keeps immutability without interfering with the live repository's
 prune operations.
 
@@ -77,17 +91,18 @@ prune operations.
 
 | Secret | Path | Notes |
 |---|---|---|
-| R2 credentials | `/opt/schoolcore/secrets/r2.env` (600 root) | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL`, `RESTIC_REPOSITORY` |
-| Restic repository password | `/opt/schoolcore/secrets/restic-password` (600 root) | **Must also be copied off-server** |
-| SchoolCore runtime secrets | `/opt/schoolcore/deploy/.env` (600 root) | Not uploaded by this job |
+| rclone / Google OAuth config | `/opt/schoolcore/secrets/rclone.conf` (600 root) | Holds the OAuth token. Never uploaded. |
+| Restic repository password | `/opt/schoolcore/secrets/restic-password` (600 root) | **Must also be copied off-server.** Never stored in the Drive repository. |
+| SchoolCore runtime secrets | `/opt/schoolcore/deploy/.env` (600 root) | Not uploaded by this job. |
+| Google account password | **never requested, never stored** | OAuth only. |
 
 > ### ⚠️ Mandatory off-server recovery copy
 > The Restic repository password **must** be retained somewhere the loss of `gman-02`
-> cannot destroy. If the server and that password are both lost, the encrypted R2
-> repository **cannot be restored**, even with valid R2 credentials.
+> cannot destroy. If the server and that password are both lost, the encrypted Drive
+> repository **cannot be restored**, even with a valid OAuth token.
 
-Never paste the secret access key or the Restic password into chat, Git, Compose files,
-command-line arguments, or logs.
+Never paste the OAuth token, the Restic password, or any other credential into chat,
+Git, Compose files, command-line arguments, or logs.
 
 ## 7. Verifying the latest backup
 
@@ -103,14 +118,14 @@ reachability, newest off-site snapshot and its age.
 ```bash
 sudo /opt/schoolcore/scripts/backup.sh
 ```
-Single-instance via `flock`; non-zero exit on any failure. Local-only when R2
+Single-instance via `flock`; non-zero exit on any failure. Local-only when the Drive
 credentials are absent (off-site step is logged as `SKIPPED`).
 
 ## 9. Restore to a new server
 
 1. Provision the host; install Docker, Restic 0.18.x.
 2. Restore `/opt/schoolcore/` from a backup (or re-clone the repo and re-apply config).
-3. Re-create secrets by name: `deploy/.env`, `secrets/r2.env`, `secrets/restic-password`.
+3. Re-create secrets by name: `deploy/.env`, `secrets/rclone.conf`, `secrets/restic-password`.
 4. Start PostgreSQL, restore the logical dump:
    ```bash
    docker cp schoolcore.dump <pg-container>:/tmp/d.dump
