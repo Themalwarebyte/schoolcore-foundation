@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — SchoolCore Backup rclone</title>
+<meta name="description" content="Privacy policy for the SchoolCore Backup rclone off-site backup integration.">
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+         line-height: 1.6; margin: 0; padding: 2.5rem 1.25rem; color: #1a1a1a; background: #ffffff; }
+  main { max-width: 44rem; margin: 0 auto; }
+  h1 { font-size: 1.65rem; margin: 0 0 .25rem; letter-spacing: -0.01em; }
+  .sub { color: #5b6472; margin: 0 0 2rem; }
+  h2 { font-size: 1.05rem; margin: 2rem 0 .5rem; }
+  ul { padding-left: 1.15rem; }
+  li { margin: .4rem 0; }
+  .nav { margin: 2.5rem 0 0; padding-top: 1.25rem; border-top: 1px solid #e3e6ea; }
+  .nav a { display: inline-block; margin-right: 1.5rem; color: #1a4fd6; text-decoration: none; font-weight: 600; }
+  .nav a:hover { text-decoration: underline; }
+  footer { margin-top: 2rem; font-size: .875rem; color: #5b6472; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #e8eaed; background: #14161a; }
+    .sub, footer { color: #9aa3b2; }
+    .nav { border-top-color: #2a2f38; }
+    .nav a { color: #7aa7ff; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Privacy Policy</h1>
+  <p class="sub">SchoolCore Backup rclone</p>
+
+  <h2>Google account used</h2>
+  <p>
+    This integration uses a dedicated backup Google account controlled by the
+    SchoolCore owner. That account is used solely to hold encrypted off-site
+    SchoolCore backup data.
+  </p>
+
+  <h2>Permission requested</h2>
+  <p>
+    Access is requested with the <code>drive.file</code> scope. This grants the
+    integration access <strong>only to files and folders it creates or
+    manages</strong>. It cannot read, list or modify unrelated content in the
+    account.
+  </p>
+
+  <h2>What is stored</h2>
+  <ul>
+    <li>Encrypted backup repository objects for SchoolCore.</li>
+    <li>Backup data is <strong>encrypted using Restic before upload</strong>, so
+        stored objects are not readable as plaintext.</li>
+    <li>No Google account password is ever collected or stored.</li>
+  </ul>
+
+  <h2>How data is used</h2>
+  <p>
+    Stored data is used <strong>solely</strong> for backup, integrity checking,
+    retention management and restore operations. Google user data is
+    <strong>not sold</strong> and <strong>not shared</strong> for advertising or
+    marketing.
+  </p>
+
+  <h2>Where credentials are kept</h2>
+  <p>
+    OAuth credentials are held securely on the owner's self-hosted server and
+    are never exposed publicly.
+  </p>
+
+  <h2>Revoking access</h2>
+  <p>
+    The owner may revoke Google OAuth access at any time through their Google
+    account security settings, after which the integration can no longer reach
+    the backup data.
+  </p>
+
+  <h2>Contact</h2>
+  <p>
+    Privacy questions: <a href="mailto:venturesgman@gmail.com">venturesgman@gmail.com</a>
+  </p>
+
+  <nav class="nav">
+    <a href="/oauth-backup/">Overview</a>
+    <a href="/oauth-backup/terms.html">Terms of Service</a>
+  </nav>
+</main>
+</body>
+</html>
