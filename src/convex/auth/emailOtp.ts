@@ -1,6 +1,6 @@
 import { Email } from "@convex-dev/auth/providers/Email";
-import axios from "axios";
 import { RandomReader, generateRandomString } from "@oslojs/crypto/random";
+import { getEmailProvider } from "../emailProvider";
 
 export const emailOtp = Email({
   id: "email-otp",
@@ -16,30 +16,22 @@ export const emailOtp = Email({
     return generateRandomString(random, alphabet, 6);
   },
   async sendVerificationRequest({ identifier: email, token }) {
-    // The API key must be provided through the deployment environment (Keys
-    // UI / `convex env set`) — never hardcoded in source. SchoolCore's admin
-    // sign-in flow does not use email OTP; this provider is retained from the
-    // platform template.
-    const apiKey = process.env.VLY_EMAIL_OTP_API_KEY;
-    if (!apiKey) {
-      throw new Error("Email OTP is not configured (missing VLY_EMAIL_OTP_API_KEY).");
-    }
-    try {
-      await axios.post(
-        "https://auth.freebuff.app/send_otp",
-        {
-          to: email,
-          otp: token,
-          appName: process.env.VLY_APP_NAME || "a freebuff.com application",
-        },
-        {
-          headers: {
-            "x-api-key": apiKey,
-          },
-        },
+    // Transport is selected in ../emailProvider: Resend when RESEND_API_KEY is
+    // set (self-hosted), otherwise the deprecated VLY gateway (Convex Cloud,
+    // transitional). The provider ID, OTP format, expiry and verification
+    // behaviour are unchanged.
+    const provider = getEmailProvider();
+    if (!provider) {
+      throw new Error(
+        "Email OTP is not configured. Set RESEND_API_KEY (self-hosted) or VLY_EMAIL_OTP_API_KEY (legacy Convex Cloud).",
       );
-    } catch (error) {
-      throw new Error(JSON.stringify(error));
     }
+
+    // The token is never logged. It is only placed in the message body.
+    await provider.send({
+      to: email,
+      subject: "Your SchoolCore sign-in code",
+      text: token,
+    });
   },
 });

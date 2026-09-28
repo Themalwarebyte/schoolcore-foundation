@@ -161,6 +161,19 @@ class RootErrorBoundary extends React.Component<
   }
 }
 
+// VITE_CONVEX_URL must be the Convex BACKEND origin (client queries and
+// WebSocket sync), never the HTTP Actions / site origin.
+//
+// Self-hosted values:
+//   backend  : https://schoolcore-api.ooflowdesk.com  (port 3210)
+//   site     : https://schoolcore-site.ooflowdesk.com  (port 3211)  <- do NOT use here
+//
+// The Convex client validates this value and THROWS if it ends in `.convex.site`
+// (the HTTP Actions host suffix on Convex Cloud). Custom domains such as the
+// self-hosted hostnames are accepted as-is. The bypass option
+// `skipConvexDeploymentUrlCheck` exists for unusual setups but is deliberately
+// NOT set: keeping the check on means a mis-pointed URL fails loudly at start-up
+// instead of silently at runtime.
 const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
 
 function RouteSyncer() {
