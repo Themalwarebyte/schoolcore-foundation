@@ -11,7 +11,7 @@
 |---|---|---|---|
 | 1. Server-local | `gman-02` → `/opt/schoolcore/backups/<UTC-timestamp>/` | PostgreSQL logical dump, approved Convex snapshots, manifests, Compose config, restore notes | root-only (0700) |
 | 2. Workstation | Windows dev workstation | Final PROD snapshot, pre-purge Git archive, runbooks | Operator-controlled |
-| 3. **Off-site** | **Google Drive** — account `offsitebackup1@gmail.com`, folder `SchoolCore-Backups` | Restic-encrypted repository at `rclone:schoolcore-drive:SchoolCore-Backups/restic` | **Client-side AES-256 encryption** |
+| 3. **Off-site** | **Google Drive** — account `offsitebackups1@gmail.com`, folder `SchoolCore-Backups` | Restic-encrypted repository at `rclone:schoolcore-drive:SchoolCore-Backups/restic` | **Client-side AES-256 encryption** |
 
 **Raw unencrypted uploads are never used.** Everything in tier 3 passes through Restic
 encryption before it leaves the server. The Restic repository is the only thing written
@@ -20,7 +20,7 @@ uploaded in the clear.
 
 > **Account roles are strictly separated**
 > - `venturesgman@gmail.com` — **admin/operations mailbox** (Resend recipient, operational contact). **Never a backup target.**
-> - `offsitebackup1@gmail.com` — **off-site backup account only.** Used for nothing else.
+> - `offsitebackups1@gmail.com` — **off-site backup account only.** Used for nothing else.
 > - `SchoolCore <noreply@mail.ooflowdesk.com>` — outbound sender, never a backup target.
 
 ## 2. What is backed up
@@ -44,19 +44,27 @@ repository password *and* the Google OAuth config; see §6.
 | Tool | Restic **0.18.0** (Debian package) |
 | Transport | **rclone v1.60.1** → Google Drive backend |
 | rclone remote | `schoolcore-drive` |
-| Google account | `offsitebackup1@gmail.com` (backup use only) |
+| Google account | `offsitebackups1@gmail.com` (backup use only) |
 | Drive folder | `SchoolCore-Backups` |
 | Repository | `rclone:schoolcore-drive:SchoolCore-Backups/restic` |
 | rclone config | `/opt/schoolcore/secrets/rclone.conf` (600 root), referenced via `RCLONE_CONFIG` |
-| Authentication | Google OAuth (headless). **The account password is never requested or stored.** |
+| Authentication | Google OAuth via rclone's **headless** flow, using an **owner-controlled OAuth Desktop app**. rclone's shared built-in client is **not** used, so Google's shared-quota rate limit does not apply. **The account password is never requested or stored.** |
 | Encryption | Client-side, AES-256, key derived from the Restic repository password |
 
 The rclone OAuth config alone cannot decrypt the repository; the Restic repository
 password alone cannot reach it. **Both are required, and they are stored separately.**
 
-**Drive scope:** limited to files created/managed by this backup integration
-(`drive.scope=drive`, the minimum that reliably supports Restic's object model).
-No unrelated Drive content is browsed or inspected.
+**Drive scope:** `drive.file` — the restricted scope, granting access **only to files
+this backup integration creates or manages**. The integration cannot see, enumerate, or
+read any other file in `offsitebackups1@gmail.com`. No unrelated Drive content is ever
+browsed or inspected.
+
+> **Scope caveat:** `drive.file` is the least-privilege choice and is correct here because
+> Restic only ever operates on objects it created. If repository initialisation or
+> uploads fail with a permission error, widen to `scope=drive` **temporarily for
+> diagnosis only**:
+> `rclone config update schoolcore-drive scope drive`
+> then restore `drive.file` immediately afterwards.
 
 ## 4. Retention
 
