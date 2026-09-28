@@ -301,15 +301,61 @@ self-host, rollback means data loss for anything written after cutover.
 
 ---
 
-## 10. Email status
+## 10. Email status — ✅ **PRODUCTION READY**
 
-`RESEND_API_KEY` is configured. `RESEND_FROM_EMAIL` is **unset/unverified**.
+| Item | Value |
+|---|---|
+| Sending domain | `mail.ooflowdesk.com` — **VERIFIED** in Resend (created 2026-08-03, region `eu-west-1`) |
+| SPF | `send.mail.ooflowdesk.com` → `v=spf1 include:amazonses.com …` |
+| DKIM | `resend._domainkey.mail.ooflowdesk.com` → public key published |
+| `RESEND_FROM_EMAIL` (sender) | `SchoolCore <noreply@mail.ooflowdesk.com>` |
+| Direct transport test | **PASS** — Resend HTTP 200, message accepted |
+| Final delivery state | **delivered** |
+| Owner mailbox receipt | **confirmed** by the Owner |
+| **EMAIL STATUS** | **PRODUCTION READY** |
 
-**EMAIL DELIVERY NOT PRODUCTION READY.** Email OTP has no frontend login surface
-today, so this does **not** block password-based cutover. Recommended future
-sending subdomain: `mail.ooflowdesk.com` — **the Owner must use the exact
-SPF/DKIM records Resend generates at verification time.** Do not invent DNS
-records. Do not send production email until verified.
+### Owner/admin mailbox
+
+The default owner/admin recipient for SchoolCore operational and administrative
+email — infrastructure alerts, owner notifications, controlled delivery checks —
+is the address recorded in the Phase 6C completion report.
+
+**It is an administrative recipient only. It must never be used as:**
+
+- a sender / `from` address (the sender is `noreply@mail.ooflowdesk.com`)
+- a student, guardian, or staff account address
+- a credential, bootstrap password, or `PLATFORM_ADMIN_EMAIL`
+
+No application code was changed to consume it. The application has **no**
+owner/admin notification-recipient configuration, and none was invented: the
+only `PLATFORM_ADMIN_EMAIL` usage in the codebase is a **bootstrap credential**,
+which was deliberately **not** created or restored. Where an administrative
+recipient is required, supply it explicitly at call time.
+
+### OTP status
+
+| Item | Status |
+|---|---|
+| AUTH OTP TRANSPORT | **CONFIGURED** (Resend provider active) |
+| FRONTEND OTP FLOW | **NOT ENABLED** |
+
+`emailOtp` is registered server-side, but the frontend has no OTP sign-in UI —
+`Auth.tsx` performs `signIn("password", …)` only. The OTP flow was **not**
+enabled as part of Phase 6C, and no further test email was sent.
+
+### JWT signing keys
+
+| Item | Status |
+|---|---|
+| Self-host `JWT_PRIVATE_KEY` | **ROTATED** (RS256, generated on gman-02) |
+| Old keypair | **Compromised** — partially exposed in command output by an agent error; deactivated |
+| `JWKS` | Regenerated from the new public key; OIDC discovery serves it |
+| Old tokens | Invalid — signature no longer verifies |
+| **JWT AUTH STATUS** | **PRODUCTION READY** |
+
+**Operational rule:** never parse multiline secrets out of `convex env list`.
+Use `convex env set <NAME> --from-file <file>` for PEM material, and verify
+only the specific non-secret variable you need.
 
 ---
 

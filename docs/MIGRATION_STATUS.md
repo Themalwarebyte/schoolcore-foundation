@@ -305,14 +305,43 @@ content is recorded in this document.
 
 ### Remaining blockers (operational / security, not migration)
 
-1. Freebuff **write-freeze mechanism** unverified - primary cutover gate
-2. Compromised production password **rotation in Freebuff** (before final backup)
-3. `SEED_SECRET` removal from Freebuff production
-4. `VLY_INTEGRATION_KEY` removal + issuer-side revocation
-5. Git history purge (all 3 branches + 22 tags)
-6. Resend sending domain verification
-7. Off-site backup provider selection
-8. Owner maintenance window and explicit GO
+    1. Freebuff **write-freeze mechanism** unverified - primary cutover gate
+    2. Compromised production password **rotation in Freebuff** (before final backup)
+    3. `SEED_SECRET` removal from Freebuff production
+    4. `VLY_INTEGRATION_KEY` removal + issuer-side revocation
+    5. Git history purge (all 3 branches + 22 tags) - COMPLETE, pushed
+    6. Resend sending domain verification - COMPLETE
+    7. Off-site backup provider selection
+    8. Owner maintenance window and explicit GO
+
+### Phase 6C - email and signing-key readiness
+
+| Item | Status |
+|---|---|
+| Resend sending domain | `mail.ooflowdesk.com` - **VERIFIED** (since 2026-08-03, eu-west-1) |
+| SPF | `send.mail.ooflowdesk.com` -> `include:amazonses.com` |
+| DKIM | `resend._domainkey.mail.ooflowdesk.com` |
+| Sender | `SchoolCore <noreply@mail.ooflowdesk.com>` |
+| Direct transport test | **PASS** (Resend HTTP 200, accepted) |
+| Final delivery state | **delivered** |
+| Owner mailbox receipt | **confirmed** by the owner |
+| **EMAIL STATUS** | **PRODUCTION READY** |
+| AUTH OTP TRANSPORT | CONFIGURED |
+| FRONTEND OTP FLOW | **NOT ENABLED** (no UI exists; password sign-in only) |
+| Self-host JWT signing keypair | **ROTATED** - old pair compromised, new RS256 pair active |
+| **JWT AUTH STATUS** | **PRODUCTION READY** |
+
+The self-host `JWT_PRIVATE_KEY` was partially exposed in command output by an
+agent error (a multiline secret was parsed out of `convex env list`). It was
+rotated immediately: the old keypair is deactivated and its tokens no longer
+verify. No Freebuff or Convex Cloud signing material was involved.
+
+The owner/admin mailbox is recorded in the runbook as an **operational
+convention for administrative sends** (infrastructure alerts, owner
+notifications, controlled delivery tests). It is deliberately **not** wired into
+application code: no `PLATFORM_ADMIN_EMAIL` bootstrap credential was created or
+restored, and no new environment variable was introduced. It must never be used
+as a sender address, as a student/guardian/staff address, or as a credential.
 
 ## Changelog
 
