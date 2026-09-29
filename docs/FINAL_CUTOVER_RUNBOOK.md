@@ -377,3 +377,53 @@ even after logout. Refresh/session state is managed separately. Revisit
 | `VLY_INTEGRATION_KEY` | **SAFE TO REMOVE** from this app's env — the only reader (`src/lib/vly-integrations.ts`) is never imported. Also **rotate/revoke at the VLY issuer**, since removal from the app does not invalidate it there. |
 
 Both were visible in an Owner screenshot. Never displayed or reproduced here.
+
+---
+
+## 13. Off-site backup position (Phase 6C complete)
+
+Encrypted off-site backup is **live and restore-tested**, so cutover no longer
+depends on the single local host.
+
+| Item | Value |
+|---|---|
+| Provider / remote | Google Drive, `schoolcore-drive`, scope `drive.file` |
+| Repository | `SchoolCore-Backups/restic`, Restic-encrypted |
+| Integrity | `restic check` reports no errors |
+| Restore test | **PASS** (disposable database, live environment untouched) |
+| Retention | 14 daily / 8 weekly / 12 monthly / 2 yearly |
+| Schedule | 02:30 Europe/London = 04:30 EAT during BST, `Persistent=true` |
+| Recovery password | held on gman-02 **and** an off-server owner copy |
+
+**This materially improves the cutover position:** if `gman-02` is lost or
+rolled back, a verified encrypted copy of the database and configuration
+already exists off-site. The rollback plan in section 11 gains a restoration
+source that does not depend on the host being intact.
+
+**Still required before the final import:** the compromised production
+password must be rotated, and the final PROD snapshot must be downloaded
+**after** that rotation so the archive carries the replacement hash.
+
+---
+
+## 14. Cutover completed - 2026-09-29
+
+**Outcome: SUCCESSFUL.** The procedure in sections 2-13 was executed as written.
+
+| Stage | Result |
+|---|---|
+| Final source snapshot | `0ad7eaf0-ba69-45c6-8bbf-3bea8e7c364a.zip`, 101,268 bytes |
+| SHA256 | `539ef46b08df9b82c1c17710593faf67ad3c8310ccf40de5f8b152abab19e765` (verified both ends) |
+| Import | 666 documents, replacement semantics, 12 s |
+| Data verification | counts, IDs, timestamps, relationships, tenant isolation - all PASS |
+| Authentication | existing production credential authenticates on self-host |
+| Owner acceptance | `SCHOOLCORE SELF-HOST PRODUCTION ACCEPTED` |
+| Live backup | Restic snapshot `bea9a61c` at 2026-09-29T16:28:38Z |
+
+**Freebuff PROD is now a PAUSED ARCHIVE / ROLLBACK REFERENCE.** It was
+neither resumed nor deleted. It must not be casually resumed: new writes exist
+only on the self-host deployment, so resuming Freebuff would diverge the two
+systems.
+
+**Rollback remains available** via the pre-cutover backup, the frozen Freebuff
+snapshot, and the Restic snapshots in Google Drive.

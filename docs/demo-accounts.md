@@ -12,12 +12,12 @@
 
 | # | Role           | Email                              | Password           | What it demonstrates |
 | - | -------------- | ---------------------------------- | ------------------ | -------------------- |
-| 1 | Platform Admin (super admin) | `admin@schoolcore.dev` | `ChangeMe!2026` | Cross-school platform console: school requests, schools list, platform users, platform audit. Bootstrap account (see note below). |
-| 2 | School Admin   | `admin@greenfield.ac.ke`           | `Greenfield#2026`  | Full single-school workspace for **Greenfield Academy (GRN-001)**: dashboard, academics, students, staff, finance, operations, users, settings, School Setup. |
-| 3 | Principal      | `principal@greenfield.ac.ke`       | `Greenfield#2026`  | People + academics management inside Greenfield; no user administration. |
-| 4 | Teacher        | `grace.wanjiku@greenfield.ac.ke`   | `Greenfield#2026`  | Teacher home, timetable, attendance, assignments, marks entry, results workflow. |
-| 5 | Accountant     | `accounts@greenfield.ac.ke`        | `Greenfield#2026`  | Invoices, payments, receipts, fee structures, reconciliation, bank imports, finance reports. |
-| 6 | School Admin (isolation test) | `admin@riverside.ac.ke` | `Riverside#2026` | **Riverside School (RVS-002)** — exists to prove tenant isolation: signing in here must never show Greenfield data. |
+| 1 | Platform Admin (super admin) | `admin@schoolcore.dev` | `<set privately by administrator>` | Cross-school platform console: school requests, schools list, platform users, platform audit. Bootstrap account (see note below). |
+| 2 | School Admin   | `admin@greenfield.ac.ke`           | `<set privately by administrator>`  | Full single-school workspace for **Greenfield Academy (GRN-001)**: dashboard, academics, students, staff, finance, operations, users, settings, School Setup. |
+| 3 | Principal      | `principal@greenfield.ac.ke`       | `<set privately by administrator>`  | People + academics management inside Greenfield; no user administration. |
+| 4 | Teacher        | `grace.wanjiku@greenfield.ac.ke`   | `<set privately by administrator>`  | Teacher home, timetable, attendance, assignments, marks entry, results workflow. |
+| 5 | Accountant     | `accounts@greenfield.ac.ke`        | `<set privately by administrator>`  | Invoices, payments, receipts, fee structures, reconciliation, bank imports, finance reports. |
+| 6 | School Admin (isolation test) | `admin@riverside.ac.ke` | `<set privately by administrator>` | **Riverside School (RVS-002)** — exists to prove tenant isolation: signing in here must never show Greenfield data. |
 | 7 | Parent         | `parent.wanjiku@greenfield.ac.ke`  | `Parent#2026`      | Parent portal with **two linked children** (child switcher), attendance, results, report cards, fees, invoices, receipts, announcements. |
 | 8 | Student        | `student.demo@greenfield.ac.ke`    | `Student#2026`     | Student portal: timetable, assignments, attendance, published results, report card, announcements. |
 

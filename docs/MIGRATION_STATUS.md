@@ -343,6 +343,62 @@ application code: no `PLATFORM_ADMIN_EMAIL` bootstrap credential was created or
 restored, and no new environment variable was introduced. It must never be used
 as a sender address, as a student/guardian/staff address, or as a credential.
 
+
+### Phase 6C - encrypted off-site backup (Google Drive)
+
+| Item | Status |
+|---|---|
+| Provider | **Google Drive** (encrypted off-site tier) |
+| Account | dedicated backup account, owner-controlled |
+| Remote / scope | `schoolcore-drive` / `drive.file` (files it creates only) |
+| Folder / repository | `SchoolCore-Backups` / `restic` sub-path |
+| Restic | **0.18.0**, repository encrypted, password-wrapped master key |
+| Restic password | generated on gman-02, root:root 0600, **off-server copy verified** |
+| First snapshot | created and readable; `restic check` **no errors** |
+| Restore test | **PASS** - disposable PostgreSQL restore, plaintext shredded |
+| Retention | 14 daily / 8 weekly / 12 monthly / 2 yearly, Restic-managed |
+| Schedule | systemd timer 02:30 Europe/London (04:30 EAT during BST), Persistent=true |
+| Health check | **HEALTHY** |
+| Plaintext artefacts on Drive | **none** - only the encrypted repository is stored |
+
+Backup never requires application downtime: the PostgreSQL logical dump runs
+against the live container while the SchoolCore stack keeps serving.
+
+
+### Phase 6B/7 - PRODUCTION CUTOVER COMPLETED (2026-09-29)
+
+| Item | Value |
+|---|---|
+| Completion date | 2026-09-29 |
+| Source deployment | Freebuff / Convex Cloud `kindhearted-goldfish-282` (**PAUSED ARCHIVE**) |
+| Final source snapshot | `0ad7eaf0-ba69-45c6-8bbf-3bea8e7c364a.zip` (101,268 bytes) |
+| Snapshot SHA256 | `539ef46b08df9b82c1c17710593faf67ad3c8310ccf40de5f8b152abab19e765` |
+| Transfer verification | SHA256 matched workstation and server exactly |
+| Import | **666 documents**, replacement semantics, **12 seconds** |
+| Count verification | **PASS** - every table signature delta 0 |
+| `_id` preservation | **PASS** - sampled IDs found in destination across 6 tables |
+| `_creationTime` preservation | **PASS** |
+| Relationship integrity | **PASS** - 0 orphans across 5 relationship types |
+| Tenant isolation | **PASS** - cross-tenant blocked, own-school allowed, anonymous blocked |
+| Migrated authentication | **PASS** - existing production credential authenticates on self-host |
+| Application smoke test | **PASS** |
+| Owner browser acceptance | **PASS** - `SCHOOLCORE SELF-HOST PRODUCTION ACCEPTED` |
+| Public endpoint health | **PASS** - frontend / API / OIDC / JWKS all HTTP 200 |
+| Convex dashboard | private, no public DNS |
+| SchoolCore host-published ports | **0** |
+| `/srv/platform` | untouched throughout |
+| First live production backup | snapshot `bea9a61c`, 2026-09-29T16:28:38Z, dump 3,127,482 B |
+| Off-site backup | **PASS** - Restic/Google Drive, `restic check` no errors, health HEALTHY |
+| Rollback | **READY** - pre-cutover backup, frozen Freebuff snapshot, 5 Restic snapshots |
+
+### Production endpoints
+| Purpose | URL |
+|---|---|
+| Frontend | `https://schoolcore.ooflowdesk.com` |
+| Convex API | `https://schoolcore-api.ooflowdesk.com` |
+| Convex site / OIDC | `https://schoolcore-site.ooflowdesk.com` |
+| Convex dashboard | internal only, no public route |
+
 ## Changelog
 
 | Date | Change |

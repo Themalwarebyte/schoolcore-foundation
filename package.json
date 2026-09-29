@@ -3,12 +3,17 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "packageManager": "bun@1.4.2",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p src/convex/tsconfig.json",
+    "test:unit": "bun test scripts/engines.test.ts",
+    "test:integration": "bun scripts/phase2.test.ts && bun scripts/phase3.test.ts",
+    "ci": "bun run typecheck && bun run test:unit && bun run lint && bun run build"
   },
   "dependencies": {
     "@convex-dev/auth": "^0.0.90",

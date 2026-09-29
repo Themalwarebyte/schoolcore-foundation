@@ -11,7 +11,7 @@
 |---|---|---|---|
 | 1. Server-local | `gman-02` → `/opt/schoolcore/backups/<UTC-timestamp>/` | PostgreSQL logical dump, approved Convex snapshots, manifests, Compose config, restore notes | root-only (0700) |
 | 2. Workstation | Windows dev workstation | Final PROD snapshot, pre-purge Git archive, runbooks | Operator-controlled |
-| 3. **Off-site** | **Google Drive** — account `offsitebackup1@gmail.com`, folder `SchoolCore-Backups` | Restic-encrypted repository at `rclone:schoolcore-drive:SchoolCore-Backups/restic` | **Client-side AES-256 encryption** |
+| 3. **Off-site** | **Google Drive** — account `offsitebackups1@gmail.com`, folder `SchoolCore-Backups` | Restic-encrypted repository at `rclone:schoolcore-drive:SchoolCore-Backups/restic` | **Client-side AES-256 encryption** |
 
 **Raw unencrypted uploads are never used.** Everything in tier 3 passes through Restic
 encryption before it leaves the server. The Restic repository is the only thing written
@@ -20,7 +20,7 @@ uploaded in the clear.
 
 > **Account roles are strictly separated**
 > - `venturesgman@gmail.com` — **admin/operations mailbox** (Resend recipient, operational contact). **Never a backup target.**
-> - `offsitebackup1@gmail.com` — **off-site backup account only.** Used for nothing else.
+> - `offsitebackups1@gmail.com` — **off-site backup account only.** Used for nothing else.
 > - `SchoolCore <noreply@mail.ooflowdesk.com>` — outbound sender, never a backup target.
 
 ## 2. What is backed up
@@ -44,19 +44,27 @@ repository password *and* the Google OAuth config; see §6.
 | Tool | Restic **0.18.0** (Debian package) |
 | Transport | **rclone v1.60.1** → Google Drive backend |
 | rclone remote | `schoolcore-drive` |
-| Google account | `offsitebackup1@gmail.com` (backup use only) |
+| Google account | `offsitebackups1@gmail.com` (backup use only) |
 | Drive folder | `SchoolCore-Backups` |
 | Repository | `rclone:schoolcore-drive:SchoolCore-Backups/restic` |
 | rclone config | `/opt/schoolcore/secrets/rclone.conf` (600 root), referenced via `RCLONE_CONFIG` |
-| Authentication | Google OAuth (headless). **The account password is never requested or stored.** |
+| Authentication | Google OAuth via rclone's **headless** flow, using an **owner-controlled OAuth Desktop app**. rclone's shared built-in client is **not** used, so Google's shared-quota rate limit does not apply. **The account password is never requested or stored.** |
 | Encryption | Client-side, AES-256, key derived from the Restic repository password |
 
 The rclone OAuth config alone cannot decrypt the repository; the Restic repository
 password alone cannot reach it. **Both are required, and they are stored separately.**
 
-**Drive scope:** limited to files created/managed by this backup integration
-(`drive.scope=drive`, the minimum that reliably supports Restic's object model).
-No unrelated Drive content is browsed or inspected.
+**Drive scope:** `drive.file` — the restricted scope, granting access **only to files
+this backup integration creates or manages**. The integration cannot see, enumerate, or
+read any other file in `offsitebackups1@gmail.com`. No unrelated Drive content is ever
+browsed or inspected.
+
+> **Scope caveat:** `drive.file` is the least-privilege choice and is correct here because
+> Restic only ever operates on objects it created. If repository initialisation or
+> uploads fail with a permission error, widen to `scope=drive` **temporarily for
+> diagnosis only**:
+> `rclone config update schoolcore-drive scope drive`
+> then restore `drive.file` immediately afterwards.
 
 ## 4. Retention
 
@@ -146,7 +154,76 @@ npx convex import <snapshot.zip>          # replacement semantics — never --ap
 The Phase 6A rehearsal snapshot is **not** a cutover snapshot. The final cutover uses a
 freshly downloaded PROD snapshot taken after the write freeze and after password rotation.
 
-## 11. Related
+## 11. Operational status
+
+Verified 2026-09-27/28 against the live repository.
+
+| Item | Value |
+|---|---|
+| Repository id | `8ec26daf73…` (restic v2 repo) |
+| First snapshot | `7490fcbf` — 2026-09-28 14:47 BST, host `gman-02` |
+| Snapshot tags | `schoolcore, automated, postgres, gman-02` |
+| Snapshot size | 567.458 KiB |
+| Upload duration | 42 s (local dump + validate + checksum + upload, 69 s total) |
+| `restic check` | **no errors were found** |
+| Restore test | **PASS** — checksums verified, dump validated, restored into a **disposable** PostgreSQL container (5 tables, 3 182 document rows), plaintext shredded afterwards |
+| Retention | **applied** — 14 daily / 8 weekly / 12 monthly / 2 yearly, Restic-managed |
+| Scheduled run | timer `enabled` + `active`, `Persistent=true` |
+| Next run | **02:30 Europe/London** (+ up to 300 s randomised) |
+| **Nairobi mapping** | 02:30 London = **04:30 EAT** during BST; **05:30 EAT** during GMT |
+| Health check | **HEALTHY** — local fresh, Drive reachable, off-site age under 36 h |
+
+### Encryption verification
+
+Restic stores `config` in plaintext **by design**; confidentiality comes from the
+master key, which is wrapped by a scrypt key derived from the repository
+password. Verified on the Drive objects:
+
+- Only `restic/` exists at the Drive folder top level — **no plaintext backup
+  artefacts** outside the repository
+- A sampled data pack begins `3e b5 d9 b1 1a 2c 29 81 …` (high-entropy
+  ciphertext, not ASCII)
+- The plaintext marker `PostgreSQL database dump` occurs **0** times in the pack
+
+### Off-server recovery copy — MANDATORY
+
+The Restic repository password is stored at
+`/opt/schoolcore/secrets/restic-password` (root:root, 0600). A verified
+copy exists on the owner workstation at
+`E:\AI-Development\Backups\SchoolCore\recovery\restic-password`
+(SHA-256 matched at transfer time).
+
+> **Loss of this password = permanent loss of the encrypted repository.** The
+> rclone OAuth token alone cannot decrypt it, and the password alone cannot
+> reach it. Both are required, and they are stored separately.
+
+### Operational notes
+
+- If a backup is interrupted on Drive, a **stale restic lock** can make the
+  repository appear unreachable. `backup-health.sh` detects and clears locks it
+  finds; if a lock is genuinely active, `restic unlock` is the manual step.
+- `backup-health.sh` exits non-zero when the newest off-site snapshot is older
+  than **36 hours**.
+
+
+### First live production backup (post-cutover)
+
+The first backup taken after the owner accepted the migrated deployment:
+
+| Field | Value |
+|---|---|
+| Timestamp (UTC) | 2026-09-29T16:28:38Z |
+| Local path | `/opt/schoolcore/backups/20260929-162836` (3.1 MB, 8 files) |
+| PostgreSQL dump | 3,127,482 bytes, `pg_restore` validated |
+| Checksums | `SHA256SUMS` 8/8 verified |
+| Restic snapshot | `bea9a61c` |
+| Upload duration | 39 s (69 s total) |
+| `restic check` | no errors (5/5 snapshots) |
+| Backup health | **HEALTHY** |
+
+This is the baseline against which later backups should be compared.
+
+## 13. Related
 
 - `docs/FINAL_CUTOVER_RUNBOOK.md` — cutover sequence, rollback, acceptance gates
 - `docs/MIGRATION_STATUS.md` — phase status
