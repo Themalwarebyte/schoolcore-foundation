@@ -12,6 +12,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p src/convex/tsconfig.json",
     "test:unit": "bun test scripts/engines.test.ts",
+    "test:authz": "bun test scripts/phase8-authz.test.ts",
     "test:integration": "bun scripts/phase2.test.ts && bun scripts/phase3.test.ts",
     "ci": "bun run typecheck && bun run test:unit && bun run lint && bun run build"
   },

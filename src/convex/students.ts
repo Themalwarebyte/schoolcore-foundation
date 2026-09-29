@@ -1,10 +1,62 @@
 import { ConvexError, v } from "convex/values";
 import { mutation, query, QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
-import { getSession, requirePermission, requireSchoolSession, getSchoolRecord } from "./session";
+import { getSession, requirePermission, requireSchoolSession, getSchoolRecord, type Session } from "./session";
+import { can } from "./access";
+import { parentIdentity, studentIdentity } from "./portal";
 import { recordAudit } from "./audit";
 
 type QueryCtxLike = QueryCtx;
+
+/**
+ * Single denial message for every unauthorized student read, so a caller cannot
+ * learn whether the id belongs to another student or to nobody at all.
+ */
+const NO_STUDENT_ACCESS = "You do not have access to this student.";
+
+/**
+ * Whether the caller may read `studentId` through a portal relationship
+ * rather than a staff permission.
+ *
+ * Parents may read only linked children; students only their own record.
+ * Returns false — never throws — whenever the caller has no such link, so a
+ * missing portal link, an unrelated student and a non-existent id are all
+ * indistinguishable to the client.
+ */
+async function callerOwnsStudent(
+  ctx: QueryCtxLike,
+  session: Session,
+  studentId: Id<"students">,
+): Promise<boolean> {
+  const schoolId = session.schoolId;
+  if (!schoolId) return false;
+
+  if (session.role.role === "parent") {
+    try {
+      const guardian = await parentIdentity(ctx, schoolId, session.userId);
+      const link = await ctx.db
+        .query("guardianStudents")
+        .withIndex("by_guardian_student", (q) =>
+          q.eq("guardianId", guardian._id).eq("studentId", studentId),
+        )
+        .first();
+      return !!link;
+    } catch {
+      return false;
+    }
+  }
+
+  if (session.role.role === "student") {
+    try {
+      const own = await studentIdentity(ctx, schoolId, session.userId);
+      return own._id === studentId;
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
+}
 
 async function getCurrentYearId(
   ctx: QueryCtxLike,
@@ -124,10 +176,28 @@ export const get = query({
   args: { studentId: v.id("students") },
   handler: async (ctx, { studentId }) => {
     const session = await getSession(ctx);
+
+    if (!session.isPlatform && !can(session.role, "students.view")) {
+      // The parent and student roles deliberately hold no students.view: the
+      // generic student endpoints are school-wide and would expose other
+      // families' children (see ROLE_PERMISSIONS in schema.ts). They may only
+      // ever read their own linked records. The relationship is checked before
+      // the record is loaded, so an unrelated student and a non-existent id
+      // produce the identical denial.
+      if (!(await callerOwnsStudent(ctx, session, studentId))) {
+        throw new ConvexError(NO_STUDENT_ACCESS);
+      }
+      const own = await ctx.db.get(studentId);
+      if (!own || own.schoolId !== session.schoolId) {
+        throw new ConvexError(NO_STUDENT_ACCESS);
+      }
+      return own;
+    }
+
     const student = await ctx.db.get(studentId);
     if (!student) throw new ConvexError("Student not found.");
-    if (session.schoolId !== student.schoolId && !session.isPlatform) {
-      throw new ConvexError("You do not have access to this student.");
+    if (!session.isPlatform && session.schoolId !== student.schoolId) {
+      throw new ConvexError(NO_STUDENT_ACCESS);
     }
     return student;
   },
@@ -136,7 +206,13 @@ export const get = query({
 export const stats = query({
   args: {},
   handler: async (ctx) => {
-    const session = await requireSchoolSession(ctx);
+    // Whole-school enrolment analytics (headcount, gender split, boarding).
+    // The school-context requirement is unchanged; the students.view gate is
+    // added so the parent and student roles — which hold no students.view —
+    // can never see a school-wide aggregate. Strictly additive: every caller
+    // that succeeded before still succeeds.
+    await requireSchoolSession(ctx);
+    const session = await requirePermission(ctx, "students.view");
     const students = await ctx.db
       .query("students")
       .withIndex("by_school", (q) => q.eq("schoolId", session.schoolId as Id<"schools">))
@@ -156,7 +232,12 @@ export const stats = query({
 export const recent = query({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, { limit }) => {
-    const session = await requireSchoolSession(ctx);
+    // Administration roster of the most recently enrolled students, not a
+    // portal feed. The school-context requirement is unchanged; students.view
+    // is now required as well, so parent and student accounts cannot
+    // enumerate the school roll. Strictly additive.
+    await requireSchoolSession(ctx);
+    const session = await requirePermission(ctx, "students.view");
     const students = await ctx.db
       .query("students")
       .withIndex("by_school", (q) => q.eq("schoolId", session.schoolId as Id<"schools">))

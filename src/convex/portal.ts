@@ -14,7 +14,7 @@ import { recordAudit } from "./audit";
  * guardianPortalLinks table. Active link + same school + active guardian
  * are all enforced here; every parent query starts from this function.
  */
-async function parentIdentity(
+export async function parentIdentity(
   ctx: QueryCtx | MutationCtx,
   schoolId: Id<"schools">,
   userId: Id<"users">,
@@ -35,7 +35,7 @@ async function parentIdentity(
 }
 
 /** Resolve the signed-in student to their Student record the same way. */
-async function studentIdentity(
+export async function studentIdentity(
   ctx: QueryCtx | MutationCtx,
   schoolId: Id<"schools">,
   userId: Id<"users">,
