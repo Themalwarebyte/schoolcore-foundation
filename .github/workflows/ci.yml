@@ -1,0 +1,57 @@
+name: CI
+
+# Runs on pull requests and pushes to the development/integration branches.
+# Deliberately does NOT run on selfhost-production: that branch is the
+# accepted production baseline and is gated by the release workflow instead.
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - selfhost-production
+      - phase5-selfhost-readiness
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: typecheck, unit tests, lint, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bun (pinned)
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.5"
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-
+
+      - name: Install dependencies (frozen lockfile)
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      # Unit tests only. scripts/engines.test.ts exercises pure calculation
+      # engines with no backend dependency, so it is safe for CI.
+      # The phase2/phase3 suites require SMOKE_CONVEX_URL against a real
+      # deployment and are intentionally NOT run here - see
+      # docs/PRODUCTION_RELEASE_WORKFLOW.md for where they belong.
+      - name: Unit tests
+        run: bun run test:unit
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Build
+        run: bun run build
