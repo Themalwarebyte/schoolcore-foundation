@@ -102,7 +102,7 @@ the repository**. `.env.example` (if present) must contain placeholders only.
 | `JWT_PRIVATE_KEY`, `JWKS` | Convex Auth token signing keys (provisioned automatically by the platform; never hardcode or commit). |
 | `PLATFORM_ADMIN_EMAIL`    | Bootstrap super admin email (default `admin@schoolcore.dev`).   |
 | `PLATFORM_ADMIN_NAME`     | Bootstrap super admin name.                                     |
-| `PLATFORM_ADMIN_PASSWORD` | Bootstrap super admin password (dev default `ChangeMe!2026`).   |
+| `PLATFORM_ADMIN_PASSWORD` | Bootstrap super admin password (dev default `<set privately by administrator>`).   |
 | `SEED_SECRET`             | Guard for the seed action. **Required** — the seed refuses to run without it; set a strong random value. |
 
 Do **not** set Convex system variables by hand: `CONVEX_SITE_URL` (the deployment's
@@ -183,16 +183,16 @@ bun run build
 
 ## Demo accounts
 
-Created by the seed. Passwords are clearly non-production.
+Created by the seed. Passwords are set privately by the administrator and are never documented here.
 
 | Role            | Email                          | Password          |
 | --------------- | ------------------------------ | ----------------- |
-| Super Admin     | `admin@schoolcore.dev`         | `ChangeMe!2026`   |
-| School Admin    | `admin@greenfield.ac.ke`       | `Greenfield#2026` |
-| Principal       | `principal@greenfield.ac.ke`   | `Greenfield#2026` |
-| Accountant      | `accounts@greenfield.ac.ke`    | `Greenfield#2026` |
-| Teacher         | `grace.wanjiku@greenfield.ac.ke` | `Greenfield#2026` |
-| School Admin 2  | `admin@riverside.ac.ke`        | `Riverside#2026`  |
+| Super Admin     | `admin@schoolcore.dev`         | `<set privately by administrator>`   |
+| School Admin    | `admin@greenfield.ac.ke`       | `<set privately by administrator>` |
+| Principal       | `principal@greenfield.ac.ke`   | `<set privately by administrator>` |
+| Accountant      | `accounts@greenfield.ac.ke`    | `<set privately by administrator>` |
+| Teacher         | `grace.wanjiku@greenfield.ac.ke` | `<set privately by administrator>` |
+| School Admin 2  | `admin@riverside.ac.ke`        | `<set privately by administrator>`  |
 
 ## Role descriptions
 
