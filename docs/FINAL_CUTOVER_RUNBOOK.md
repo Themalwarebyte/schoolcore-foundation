@@ -403,3 +403,27 @@ source that does not depend on the host being intact.
 **Still required before the final import:** the compromised production
 password must be rotated, and the final PROD snapshot must be downloaded
 **after** that rotation so the archive carries the replacement hash.
+
+---
+
+## 14. Cutover completed - 2026-09-29
+
+**Outcome: SUCCESSFUL.** The procedure in sections 2-13 was executed as written.
+
+| Stage | Result |
+|---|---|
+| Final source snapshot | `0ad7eaf0-ba69-45c6-8bbf-3bea8e7c364a.zip`, 101,268 bytes |
+| SHA256 | `539ef46b08df9b82c1c17710593faf67ad3c8310ccf40de5f8b152abab19e765` (verified both ends) |
+| Import | 666 documents, replacement semantics, 12 s |
+| Data verification | counts, IDs, timestamps, relationships, tenant isolation - all PASS |
+| Authentication | existing production credential authenticates on self-host |
+| Owner acceptance | `SCHOOLCORE SELF-HOST PRODUCTION ACCEPTED` |
+| Live backup | Restic snapshot `bea9a61c` at 2026-09-29T16:28:38Z |
+
+**Freebuff PROD is now a PAUSED ARCHIVE / ROLLBACK REFERENCE.** It was
+neither resumed nor deleted. It must not be casually resumed: new writes exist
+only on the self-host deployment, so resuming Freebuff would diverge the two
+systems.
+
+**Rollback remains available** via the pre-cutover backup, the frozen Freebuff
+snapshot, and the Restic snapshots in Google Drive.

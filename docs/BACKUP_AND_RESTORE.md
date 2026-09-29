@@ -205,7 +205,25 @@ copy exists on the owner workstation at
 - `backup-health.sh` exits non-zero when the newest off-site snapshot is older
   than **36 hours**.
 
-## 12. Related
+
+### First live production backup (post-cutover)
+
+The first backup taken after the owner accepted the migrated deployment:
+
+| Field | Value |
+|---|---|
+| Timestamp (UTC) | 2026-09-29T16:28:38Z |
+| Local path | `/opt/schoolcore/backups/20260929-162836` (3.1 MB, 8 files) |
+| PostgreSQL dump | 3,127,482 bytes, `pg_restore` validated |
+| Checksums | `SHA256SUMS` 8/8 verified |
+| Restic snapshot | `bea9a61c` |
+| Upload duration | 39 s (69 s total) |
+| `restic check` | no errors (5/5 snapshots) |
+| Backup health | **HEALTHY** |
+
+This is the baseline against which later backups should be compared.
+
+## 13. Related
 
 - `docs/FINAL_CUTOVER_RUNBOOK.md` — cutover sequence, rollback, acceptance gates
 - `docs/MIGRATION_STATUS.md` — phase status
