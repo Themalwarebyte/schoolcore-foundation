@@ -1,8 +1,9 @@
 name: CI
 
-# Runs on pull requests and pushes to the development/integration branches.
-# Deliberately does NOT run on selfhost-production: that branch is the
-# accepted production baseline and is gated by the release workflow instead.
+# Runs on pull requests and on every push to any maintained branch,
+# INCLUDING selfhost-production. The accepted production branch is not
+# exempt from verification - a release that lands there must be proven
+# green by the same gate as everything else.
 on:
   pull_request:
   push:
@@ -27,7 +28,7 @@ jobs:
       - name: Install Bun (pinned)
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.3.5"
+          bun-version: "1.4.2"
 
       - name: Cache dependencies
         uses: actions/cache@v4

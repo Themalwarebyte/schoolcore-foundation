@@ -22,7 +22,7 @@ isolate/
 # ---------------------------------------------------------------
 # Convex generated code (regenerated via `bunx convex dev --once`)
 # ---------------------------------------------------------------
-src/convex/_generated/
+# src/convex/_generated/  <- committed on purpose; CI typecheck needs it
 
 # ---------------------------------------------------------------
 # OS / editor noise
