@@ -4,9 +4,16 @@ Scope: close the remaining **role** authorization matrix (parent, student,
 teacher, super admin) on the isolated self-hosted environment.
 Date of pass: 2026-09-29. Branch: `selfhost-production`.
 
-**Outcome: 8.6 authorization portion is INCOMPLETE.** Two categories failed
-(parent portal isolation, student self-data isolation) because of one root
-cause documented in §16.1. No claim is made here about Phase 8 overall.
+**Status: 8.6 authorization portion is COMPLETE for the role matrix.**
+
+The first pass found a pilot-blocking defect (§16.1): parent and student
+accounts could read other students inside their own school. That discovery is
+kept verbatim below — §16.1 is the original record and is not rewritten. The
+defect was fixed in commit `db1fe52`, verified by a regression suite that fails
+on the old behaviour, and the re-run matrix is recorded in §18.
+
+This document covers the role matrix only. It makes no claim about Phase 8 as
+a whole.
 
 ---
 
@@ -426,6 +433,12 @@ seeding. It was left untouched.
 
 ### 16.1 CRITICAL — within-school horizontal access for parent and student roles
 
+> **Status: FIXED in `db1fe52`.** The analysis below is the original discovery
+> record and is kept as written. See §18 for the fix, the regression suite and
+> the re-run matrix. The remediation sketch at the end of this subsection is
+> what was actually implemented, adapted to reuse the existing portal identity
+> resolvers.
+
 Three read endpoints never call `requirePermission`, so they serve data to any
 signed-in account that merely has a school membership:
 
@@ -501,7 +514,7 @@ present in many school-scoped handlers and is worth a dedicated review.
 
 ---
 
-## 17. Result summary
+## 17. Result summary — first pass
 
 | Category | Result |
 |---|---|
@@ -516,4 +529,177 @@ present in many school-scoped handlers and is worth a dedicated review.
 Matrix totals: **94 PASS, 6 FAIL, 0 retest** across 101 rows.
 
 **8.6 authorization portion: INCOMPLETE** — two categories fail on §16.1.
-Phase 8 as a whole is not claimed complete.
+
+This section is the record of what the first pass found. It is superseded by
+§18 for the current state, and is deliberately not edited to hide the failure.
+
+---
+
+## 18. Defect fix — student horizontal access
+
+Commit `db1fe52` on `selfhost-production`. This section records the fix; the
+discovery that motivated it is §16.1 and §17.
+
+### 18.1 Root cause
+
+`students:get`, `students:stats` and `students:recent` authorized on **session
+presence** rather than on **permission**:
+
+| Endpoint | Gate before the fix | Permission it should have required |
+|---|---|---|
+| `students:get` | `getSession(ctx)` | `students.view` **or** a portal relationship |
+| `students:stats` | `requireSchoolSession(ctx)` | `students.view` |
+| `students:recent` | `requireSchoolSession(ctx)` | `students.view` |
+
+`ROLE_PERMISSIONS` (`schema.ts:381-400`) gives the `parent` role 9 permissions
+and the `student` role 6, and **neither includes `students.view`**. The role
+model was therefore already correct; these three handlers simply never consulted
+it. `students:list`, `students:update` and `students:archive` in the same file
+already used `requirePermission(ctx, "students.view")`, so the omission was
+inconsistent with its own module as well as with the schema.
+
+The design intent was already written down at `schema.ts:383-386`: the generic
+student endpoints are school-wide and "would leak other students' data within
+the school", which is precisely why the parent role is steered to `portal.*`
+queries that verify the child link server-side.
+
+### 18.2 Functions changed
+
+| File | Change |
+|---|---|
+| `src/convex/students.ts` | `get` — role-aware branch; `stats` and `recent` — `students.view` added on top of the existing school-context check; new private helper `callerOwnsStudent` and the shared `NO_STUDENT_ACCESS` message |
+| `src/convex/portal.ts` | `parentIdentity` and `studentIdentity` changed from module-private to exported, so `students.ts` reuses the already-validated resolution logic instead of reimplementing it. They remain plain async functions, not `query`/`mutation` exports, so they are not callable from a client |
+| `package.json` | added `test:authz` |
+| `scripts/phase8-authz.test.ts` | new regression suite |
+
+No enforcer was modified. `can`, `requirePermission`, `requireSchoolSession`,
+`getSession`, `parentIdentity` and `studentIdentity` are all unchanged in
+behaviour.
+
+### 18.3 Authorization rules applied
+
+`students:get`
+
+- **school admin / principal / teacher / accountant** (hold `students.view`) —
+  unchanged: the school-scoped path, still refused cross-school.
+- **platform super admin** — unchanged: retains platform-wide visibility.
+- **parent** — must resolve, through `parentIdentity`, to a guardian holding a
+  `guardianStudents` link to the requested student. Otherwise denied.
+- **student** — must resolve, through `studentIdentity`, to their own record.
+  Otherwise denied.
+- **any other role without `students.view`** — denied.
+
+The relationship is evaluated **before** the student document is loaded, and
+every failure path returns the single message
+`You do not have access to this student.` So an unrelated student, a
+cross-school student and a non-existent id are indistinguishable to the
+caller; no existence information leaks.
+
+`students:stats` and `students:recent` — `requireSchoolSession(ctx)` is
+**kept** and `requirePermission(ctx, "students.view")` is added on top. This is
+strictly additive: every caller that succeeded before still succeeds, and a
+contextless super admin is still refused with `Select a school to continue.`
+Both endpoints are administration views with no portal consumer — a frontend
+survey found **zero** call sites for either — so no portal-scoped replacement
+function was needed. `students:get` keeps its one call site, the staff-facing
+`StudentProfile` page, which holds `students.view`.
+
+One design decision worth recording: the first attempt swapped
+`requireSchoolSession` for `requirePermission` outright. That would have
+*widened* access, because `can()` returns true unconditionally for
+`super_admin` while `requireSchoolSession` had been refusing a contextless
+super admin all along. The regression suite caught it, and the change was made
+additive instead.
+
+### 18.4 Regression tests
+
+`scripts/phase8-authz.test.ts`, run with `bun run test:authz`. It drives
+`convex run --identity` — the same mechanism already validated by
+`/opt/schoolcore/scripts/authz-harness.sh` — and fabricates no tokens.
+`ConvexHttpClient` identity injection is not used. It is deliberately excluded
+from `test:unit` so CI stays hermetic and credential-free; the suite skips
+cleanly when no deployment is configured.
+
+Classification is strict, matching the harness: an argument-validation failure,
+an unrecognised `ConvexError`, a `Failed to run function`, or an empty response
+all throw rather than being scored as either a pass or a security denial.
+
+26 cases covering: school admin own/cross/list/stats/recent; teacher
+own/cross/stats/recent; parent linked child / other same-school child /
+cross-school / stats / recent; student own record / other same-school student /
+cross-school / stats / recent; anonymous on all four endpoints; and platform
+super admin.
+
+### 18.5 Test results
+
+Run against the **unfixed** deployment, before deploying `db1fe52`:
+
+```
+20 pass   6 fail
+```
+
+The 6 failures were exactly the defect — parent and student each failing
+`students:get` on a same-school peer, and on `students:stats` and
+`students:recent`. The other 20 passed on the old code, which is the important
+part: the suite pins legitimate staff and platform access as well as the hole,
+so a fix that over-blocked would be caught too.
+
+Run against the **deployed fix**:
+
+```
+26 pass   0 fail
+```
+
+The full 101-row Phase 8 matrix was then re-run end to end:
+
+```
+TOTAL PASS=100  FAIL=0  RETEST=0
+```
+
+All six previously-failing rows (P-24, P-25, P-26, S-09, S-12, S-13) now pass,
+and no row that passed before regressed.
+
+### 18.6 Deployment
+
+Followed the production release workflow in order:
+
+1. GitHub Actions run #6 on `db1fe52` — **success** (install, typecheck, unit
+   tests, lint, build all green).
+2. Production backup — local `20260929-201658`, 3.1 MB, 8 files, SHA256
+   manifest, off-site upload confirmed.
+3. Deploy — the server clone is a deployment artifact on a detached HEAD, so it
+   was moved to the exact CI-verified SHA `db1fe5295bd81dee468ebbdd3c06d84cf3ae6c77`
+   by `git checkout` rather than by branch, then `convex deploy` reported
+   `Schema validation complete` and `No indexes are deleted by this push`. The
+   deployed tree was asserted to be that commit with a clean working tree, so
+   the running code is the code CI verified.
+4. Health checks and the authorization smoke tests above.
+
+### 18.7 Cleanup after the fix verification
+
+All four fixture logins disabled again (`Your account has been disabled.`
+confirmed). Orphan `guardianStudents` references 0, orphan portal links 0.
+Per-school counts unchanged: `GRN-001` 81 students / 12 staff, `HHS-001` 0/0,
+`RVS-002` 2/1. TEACHER_A's allocation still `archived`. No pre-existing record
+was modified at any point.
+
+### 18.8 Related finding — deliberately not changed
+
+`staff:get` (`staff.ts:52-60`) uses the same bare `getSession` pattern with only
+a school check, so the same class of within-school exposure may exist for staff
+records. It was **not** changed: this pass fixed the reported defect, and
+broadening a security change beyond its validated scope is not appropriate. It
+is recorded here so it gets its own assessment rather than being fixed blind.
+
+### 18.9 Final classification
+
+| Category | Before | After |
+|---|---|---|
+| PARENT PORTAL ISOLATION | FAIL | **PASS** |
+| STUDENT PORTAL ISOLATION | FAIL | **PASS** |
+| Pilot blocker | present | **removed** |
+
+The role matrix is now 100/100 with no `INVALID_ARGUMENTS`, `FUNCTION_ERROR` or
+`HARNESS_ERROR` rows. §16.2 (the `academicOps:teacherHome` platform-context
+crash) is an availability defect rather than an isolation failure and is
+unchanged by this pass.
