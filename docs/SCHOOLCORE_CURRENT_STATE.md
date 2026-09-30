@@ -138,6 +138,9 @@ why this record was created.
 | **Backup omits the Convex storage volume** | **RESOLVED 2026-09-30.** `backup.sh` now captures `convex-data:/storage` (13 module blobs, 10 MB) alongside the dump, inside the same SHA256 manifest and the same restic encryption, excluding the `credentials/` secret. Proven by a second rehearsal restoring from the new backup alone: 0 missing-storage errors, authentication 42/42, authorization 8/8, all entity counts matching live, 7s to serving. See `BACKUP_AND_RESTORE.md` §9.1. |
 | **Recovered backend must use the production site origin** | The restored env store carries the production `CONVEX_SITE_URL`, and `auth.config.ts` builds its OIDC provider from it. Start a recovered backend on a different origin and every session resolution fails with `NoAuthProvider`. Free on a real recovery, but a sharp edge in rehearsals and indistinguishable from a broken restore. Documented in `BACKUP_AND_RESTORE.md` §9.3. |
 | **Twelve tables are queried but not declared in the schema** | `mealPlans`, `mealEnrollments`, `mealConsumption`, `schoolRequests`, `applications`, `allocationSettings`, `promotionRuns`, `paymentAllocations`, `bankImportBatches`, `bankImportRows`, `feeVoteheads`, `feeItemVoteheads`. Verified working — Convex resolves their indexes implicitly and all are empty. The cost is that those documents are unvalidated and their indexes are invisible to a future schema regeneration. Hygiene, not a pilot blocker. See `DATABASE_REVIEW.md` §4.1. |
+| **The system cannot measure its own performance** | `pg_stat_statements` and `auto_explain` are not installed, `shared_preload_libraries` is empty, `log_min_duration_statement` is `-1`, Convex emits no per-function timing, and there is no metrics container. No endpoint latency, no error rate, no query time — a future regression would be invisible until a user reported it. Cheapest fix is to add per-endpoint latency and error rate to the existing five-minute `production-health.sh`. See `PERFORMANCE_BASELINE.md` §6. |
+| **User-visible latency is network-bound, not application-bound** | Origin execution is **p50 3.1 ms**; public end-to-end is **~780 ms**, of which ~178 ms is TLS establishment through the Cloudflare Tunnel. Roughly 99.6% of what a user experiences is outside the application. If users report slowness, the levers are network-path, not query-level. See `PERFORMANCE_BASELINE.md` §5. |
+| **No container resource limits** | Every SchoolCore container reports `memory=0 cpus=0` — unlimited. A leak in the backend or database could not be contained and would compete with the host. Cheap to add at the next compose change. |
 
 ---
 
@@ -193,6 +196,6 @@ Stated so nobody re-derives them:
 - **Freebuff/Convex Cloud is not "live production".** It is a paused archive.
 - **A green CI run does not mean deployed.** Only `d9ba8b7` is running.
 - **All three pilot blockers are closed** (PB-1, PB-2, PB-3). That is a
-  precondition for Gate 10, not the same thing as pilot readiness — Gates 5–9
-  have not started.
+  precondition for Gate 10, not the same thing as pilot readiness — Gates 6, 8
+  and 9 have not started.
 - **The swap warning is not an incident.**

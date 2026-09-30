@@ -257,23 +257,63 @@ Evidence: `docs/DATABASE_REVIEW.md`.
 
 ---
 
-### Gate 5 — Performance Baseline
+### Gate 5 — Performance Baseline — **COMPLETE**
 
 **8.8**
 
-**Objective.** Establish a measured baseline so future changes can be judged
-against evidence rather than impression.
+Measured in two layers — origin execution (inside `schoolcore-net`, excluding
+network) and public end-to-end (through the real Cloudflare Tunnel) — using
+sequential, read-only synthetic requests. No load test: generating synthetic
+load against a live production system holding real school data is an asymmetric
+risk against information the current numbers already bound.
 
-**Prerequisites.** Gate 4 complete, so the baseline is not distorted by known
-query problems.
+| Acceptance criterion | Result |
+|---|---|
+| Production baseline captured | PostgreSQL 17.11, 21 MB, 6,916 live rows, 3,924 entities, 1 connection |
+| Resource baseline captured | 4 cores, load 0.21, 12.3 GB RAM free, 1% disk; backend 359 MiB, postgres 39 MiB |
+| Important workflows measured | 20 endpoints: sign-in, session, admin/teacher/parent/student portals, lists, single records, academic, finance |
+| Performance risks identified | 9 findings, **none blocking** |
+| 8.7 database findings incorporated | all six, §9 of the baseline document |
+| No unsupported optimization introduced | **none applied** — nothing measured was slow enough to justify a change |
+| Documentation created | `docs/PERFORMANCE_BASELINE.md` |
+| Production stability confirmed | read-only pass; SHA `8f4b84f`, all services healthy, fixtures re-disabled |
 
-**Acceptance criteria.**
-- Measured baselines recorded for page load, API latency and the operations
-  that matter operationally.
-- Test conditions and dataset size stated so the numbers are reproducible.
-- Thresholds defined for "normal", so alerting or regression detection can use
-  them later.
-- Known bottlenecks identified, with severity and effort to address.
+**Headline result.** Origin execution is **p50 3.1 ms, p95 4.4 ms** across every
+workflow, with a flat distribution — portal, list, record and three-hop
+relationship traversals all land within 1 ms of each other, which is the
+expected consequence of 8.7's index coverage.
+
+**The finding that reframes performance work:** public end-to-end is **~780 ms
+p50**, of which **~178 ms is TLS establishment through the tunnel** and only
+~3 ms is SchoolCore. **Roughly 99.6% of user-visible latency is outside the
+application's control.** Optimizing a 3 ms query would move the user experience
+by 0.1%.
+
+Also recorded: `auth:signIn` at ~238 ms is the deliberate `Scrypt` cost and must
+**not** be reduced; and an ~880 ms isolate cold start occurs on roughly 1 call
+in 20 after idle — runtime behaviour, not application code.
+
+**Two earlier measurement attempts were discarded as invalid** and this is
+recorded in the document: the generated `anyApi` object produced
+`BadConvexFunctionIdentifier` (so its "1.4 ms" figures were error responses),
+and `setAuth({subject})` produced `InvalidAuthHeader` because a raw object is
+not a signed JWT. Only the third method — a real sign-in per role with the
+issued token reused — produced valid data.
+
+**Most important gap: the system cannot measure itself.** `pg_stat_statements`
+and `auto_explain` are not installed, `shared_preload_libraries` is empty,
+`log_min_duration_statement` is `-1`, Convex emits no per-function timing, and
+there is no metrics container. No endpoint latency, no error rate, no query
+time. A future regression would be invisible until a user reported it. The
+cheapest high-value fix is **O3** in the baseline document: add per-endpoint
+latency and error rate to the existing five-minute `production-health.sh`,
+which already runs and already alerts.
+
+Also found: **no container has memory or CPU limits** — every service reports
+`memory=0 cpus=0`. A leak could not be contained. Cheap to add at the next
+compose change.
+
+Evidence: `docs/PERFORMANCE_BASELINE.md`.
 
 ---
 
