@@ -168,26 +168,65 @@ release workflow did not previously describe that path.
 
 ---
 
-### Gate 3 — Disaster Recovery
+### Gate 3 — Disaster Recovery — **INCOMPLETE**
 
 **8.5**
 
-**Objective.** Prove the system can be recovered from a loss, not merely
-backed up.
+A full restore rehearsal was executed on 2026-09-30 against a real off-site
+snapshot (`2cee6972`, 3 hours old) in a fully isolated environment. Most of the
+procedure worked, and the rehearsal surfaced a **blocker the documentation did
+not anticipate**.
 
-**Prerequisites.** Gates 1–2 complete, so recovery is validated against a
-settled codebase.
+**What passed.** Off-site retrieval with `--verify` (35 s); `sha256sum -c`
+integrity; PostgreSQL restore of the 3.2 MB dump (1 s); Convex backend start
+against the restored database (4 s); the recovered deployment serving real data
+— `schools:listSchools`, `team:me`, and `team:list` returning 14 correctly
+tenant-scoped users. Cross-tenant reads denied. PB-2's `staff:get` gate still
+holds on recovered data. The restored `JWT_PRIVATE_KEY` and `JWKS` are
+**fingerprint-identical** to live, so a restore preserves sessions rather than
+invalidating them. Database-only restore path: **~44 s**. Production was never
+a target; the rehearsal namespace was torn down and the backup repository is
+untouched (13 snapshots before and after).
 
-**Acceptance criteria.**
-- A full restore rehearsal executed from a real off-site snapshot into an
-  isolated environment, not against production.
-- Documented restore time and its known limits.
-- The consequence of a restore on the Convex environment-variable store
-  documented and exercised — a restore wipes it and requires a re-deploy.
-- Recovery documentation written and evidence recorded.
-- The two accepted backup risks (stale Restic lock; `backup-health.sh` vs the
-  freshness signal) are either mitigated or explicitly accepted with rationale.
-- No production data loss and no production downtime caused by the rehearsal.
+**The blocker.** The backup contains the PostgreSQL dump but **not** the Convex
+backend's local storage volume (`convex-data` → `/convex/data/storage/modules/`,
+16 blobs / 10 MB in production). The database holds *references* to those
+blobs. A database-only restore therefore produces a deployment that starts,
+reports healthy, and **fails every function call** with
+`Local dir storage couldn't open …/modules/<uuid>.blob`. `convex deploy` also
+fails at `start_push` for the same reason.
+
+This is the dangerous class of failure: every surface health check passes while
+the application is completely non-functional. **Until the volume is included in
+the backup, a total loss of `gman-02` is not recoverable from the backup
+alone.**
+
+**Three further gaps** found and now documented in `BACKUP_AND_RESTORE.md` §9.3:
+`INSTANCE_NAME` must match the restored database name or the backend exits;
+`pg_restore --clean` exits 1 on a fresh target even when it succeeds; and
+`deploy/.env` is not in the backup and must be re-supplied.
+
+**Objective.** Make a full recovery possible from the backup alone.
+
+**Prerequisites.** None outstanding; the findings are complete.
+
+**Acceptance criteria — 9 of 11 met.**
+
+- [x] A real off-site snapshot was retrieved
+- [x] Restore performed in an isolated environment
+- [x] Restored services started successfully — *with the storage volume supplied*
+- [x] Application health checks passed on recovered data
+- [x] Authentication validated (sign-in path, session resolution, disabled-account refusal)
+- [x] Representative data integrity confirmed (every entity count matches live; zero orphans)
+- [x] Security posture verified (no public exposure, 0 ports, tenant isolation intact)
+- [x] Recovery timing recorded
+- [x] Documentation corrected from actual experience
+- [x] No production impact occurred
+- [ ] **Backup includes the Convex storage volume, and a fresh backup restores into a working deployment with no manual volume copy** — the blocker above
+
+The tenth criterion is the one that cannot be met without a change to the
+backup implementation, which is out of scope for this gate. Gate 3 is therefore
+**not complete**, and Gate 10 must not treat it as such.
 
 ---
 

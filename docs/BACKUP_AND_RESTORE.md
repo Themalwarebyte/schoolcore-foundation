@@ -131,6 +131,11 @@ credentials are absent (off-site step is logged as `SKIPPED`).
 
 ## 9. Restore to a new server
 
+> **Rehearsed 2026-09-30 (Phase 8 Gate 3).** This procedure was executed
+> end-to-end against a real off-site snapshot in an isolated environment. The
+> corrections below are what the rehearsal actually found. **The procedure as
+> previously written was incomplete** — see §9.1.
+
 1. Provision the host; install Docker, Restic 0.18.x.
 2. Restore `/opt/schoolcore/` from a backup (or re-clone the repo and re-apply config).
 3. Re-create secrets by name: `deploy/.env`, `secrets/rclone.conf`, `secrets/restic-password`.
@@ -139,11 +144,114 @@ credentials are absent (off-site step is logged as `SKIPPED`).
    docker cp schoolcore.dump <pg-container>:/tmp/d.dump
    docker exec <pg-container> pg_restore -U convex -d schoolcore --clean /tmp/d.dump
    ```
+   `--clean` issues `DROP TABLE` for every table first, so **on a fresh
+   database it prints "does not exist" errors and exits 1 even when the restore
+   succeeds.** That is expected. Confirm success by checking that the tables
+   and document counts are present, not by the exit code.
 5. Verify integrity: `cd <backup-dir> && sha256sum -c SHA256SUMS`
-6. Re-apply the Convex deployment environment (it lives **inside the database**, so a
-   restore wipes it — see the note in `docs/FINAL_CUTOVER_RUNBOOK.md`).
+6. Re-apply the Convex deployment environment (see §9.2 — this is more precise
+   than the previous note).
 7. Re-create the Restic repository access and pull the latest snapshot.
-8. Redeploy Convex functions, then start frontend/tunnel.
+8. **Restore the Convex local storage volume** — this step was **missing** and
+   the deployment does not work without it. See §9.3.
+9. Start the Convex backend, then the frontend and tunnel.
+
+**`INSTANCE_NAME` must match the restored database name.** Convex derives the
+PostgreSQL database name from `INSTANCE_NAME` (it lower-cases and replaces
+non-alphanumerics with `_`). A backend started with `INSTANCE_NAME=schoolcore-dr`
+against a database restored as `schoolcore` exits immediately with
+`FATAL: database "schoolcore_dr" does not exist`.
+
+### 9.1 The backup is incomplete — a database-only restore does not recover a working system
+
+**This is the finding that matters.** The Convex backend keeps the *compiled*
+function modules as blob files on a Docker volume (`convex-data` →
+`/convex/data/storage/modules/`), not in PostgreSQL. The database holds
+*references* to those blobs.
+
+The backup contains the PostgreSQL dump but **not** that volume. Evidence from
+the rehearsal: `manifests/backup-metadata.txt` records
+`convex_snapshots=0`, and the restored backup contains no `.blob` files. In
+production the volume holds **16 module blobs, 10 MB**.
+
+A database-only restore produces a deployment that is **silently broken**:
+
+- the backend starts, answers `/version`, and reports healthy;
+- the database is fully populated and correct;
+- **every function call fails** with
+  `Local dir storage couldn't open /convex/data/storage/modules/<uuid>.blob:
+  No such file or directory`;
+- `convex deploy` also fails at `start_push`, because schema evaluation reads
+  the same missing blob.
+
+This is worse than a loud failure, because every surface health check passes.
+
+**Remediation required before pilot:** include the Convex storage volume in the
+backup, and restore it alongside the database. Until then, a total loss of
+`gman-02` is **not** recoverable from the backup alone.
+
+### 9.2 The Convex environment store: partly in the backup, partly not
+
+The previous note said the deployment environment "lives inside the database,
+so a restore wipes it". That is only half true, and the difference matters.
+
+**Recovered from the backup** (verified by SHA-256 fingerprint match against
+live): `JWT_PRIVATE_KEY` and `JWKS`. The restored signing key is **identical**
+to the live one, so a restore **preserves existing sessions** rather than
+invalidating them.
+
+**Not recovered** — these are only in `/opt/schoolcore/deploy/.env`, which the
+backup deliberately excludes: `CONVEX_SELF_HOSTED_ADMIN_KEY`,
+`INSTANCE_SECRET`, `CONVEX_DEPLOYMENT`, `POSTGRES_USER` / `POSTGRES_PASSWORD`,
+`CONVEX_SELF_HOSTED_URL`, `CONVEX_SITE_URL`, `SITE_URL`, `RESEND_API_KEY`,
+`RESEND_FROM_EMAIL`, `TUNNEL_TOKEN`, `VITE_CONVEX_URL`, `VLY_CONVEX_AUTH_ISSUER`.
+
+So a recovery must re-supply `deploy/.env` out of band. The backup records the
+variable *names* in `manifests/env-var-names.txt` but no values.
+
+### 9.3 Missing steps, in the order they actually mattered
+
+| # | Step not in the documented procedure | Symptom if skipped |
+|---|---|---|
+| 1 | Restore the Convex storage volume | Backend starts, every function 500s (§9.1) |
+| 2 | Match `INSTANCE_NAME` to the database name | Backend exits: `database "schoolcore_dr" does not exist` |
+| 3 | Ignore `pg_restore --clean` exit code 1 on a fresh target | False alarm that the restore failed |
+| 4 | Re-supply `deploy/.env` | Backend cannot authenticate the admin key or the instance |
+| 5 | Deploy functions **before** declaring recovery | Module table references blobs that are absent from a fresh volume |
+
+### 9.4 Observed recovery time
+
+Measured during the 2026-09-30 rehearsal, restoring a 3.2 MB dump from the
+3-hour-old off-site snapshot `2cee6972`:
+
+| Component | Observed |
+|---|---|
+| Off-site snapshot retrieve (restic, with `--verify`) | 35 s |
+| Snapshot integrity verify (`sha256sum -c`) | < 1 s |
+| PostgreSQL start | 3 s |
+| `pg_restore` of the logical dump | 1 s |
+| Convex backend start against the restored database | 4 s |
+| Application answering real queries | < 1 s |
+| **Database-only restore path** | **~44 s** |
+
+**Recovery point:** 3 hours old, on a daily 24-hour schedule, so the worst-case
+data loss is one day. That sits inside the RPO target in `BACKUP_RECOVERY.md`
+(≤ 24 h) and the restore is far inside the RTO target (≤ 8 h) for the
+data-recovery step alone. **These are not end-to-end RTO figures**: host
+provisioning and secret recovery are not automated and are not measured here.
+
+## 9.5 Recovery blockers summary
+
+A full recovery currently requires, in addition to the encrypted backup:
+
+1. The **Restic repository password** and the **rclone/OAuth config** — held
+   separately, and the Restic password must be kept off-server (§6).
+2. **`/opt/schoolcore/deploy/.env`** — not in the backup, and required.
+3. **The Convex storage volume** — not in the backup, and required.
+
+Item 3 is a gap to fix. Items 1 and 2 are already documented; item 2 is
+recorded in §9.2 because its consequence was previously understated.
+
 
 ## 10. Restoring a Convex snapshot
 

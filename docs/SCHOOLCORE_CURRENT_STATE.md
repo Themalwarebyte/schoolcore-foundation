@@ -135,6 +135,7 @@ why this record was created.
 | `academicOps:teacherHome` | Throws for a contextless platform super admin (`academicOps.ts:137`, unchecked `session.schoolId` cast into `db.get`). Availability, not isolation — no data returned. The same unchecked-cast pattern exists in many school-scoped handlers and needs a dedicated review. Not assigned a Phase 8 gate. |
 | `phase7/access:permissionMatrix` | Readable by any signed-in user (`phase7/access.ts:90-100`, bare `getSession`). Exposes permission names, not data, so low severity, but it widens the authenticated surface intentionally and should be a conscious decision. |
 | Platform super-admin school context | `staff:list` returns an empty page for a platform admin while `staff:get` returns DENIED. Both stem from the null `schoolId`; neither is deliberate design. Recorded, not resolved, because resolving it means defining a cross-school access model. |
+| **Backup omits the Convex storage volume** | **Pilot-blocking DR gap.** The PostgreSQL dump is backed up, but the Convex backend's local storage (`convex-data` → `/convex/data/storage/modules/`, 16 blobs / 10 MB in production) is not, and the database holds only *references* to it. A database-only restore starts a backend that reports healthy and then fails every function call. Verified in an isolated rehearsal on 2026-09-30: everything recovered correctly *once the volume was supplied*, and nothing worked without it. Until this is fixed, a total loss of `gman-02` is **not** recoverable from the backup alone. See `BACKUP_AND_RESTORE.md` §9.1. |
 
 ---
 
