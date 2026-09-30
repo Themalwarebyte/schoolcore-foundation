@@ -126,42 +126,45 @@ trusting the deploy exit code.
 
 ---
 
-### Gate 2 — Frontend Dependency Hardening
+### PB-3 remediation — CLOSED
+`react-router` upgraded from 7.18.1 to 7.18.4, clearing GHSA-qwww-vcr4-c8h2,
+with the declared floor tightened to `^7.18.4` so it cannot regress below the
+fix. The build path was established first: the definition is tracked as
+`Dockerfile.frontend`, correcting the earlier claim that it was absent, and the
+image was rebuilt from the committed source and deployed through Docker
+Compose. Reachability proven from the build configuration — no RSC, no SSR, no
+server actions, `@react-router/dev` not installed, nginx serving static files.
+Deployed `8f4b84f`; CI run #16 success; asset inventory identical at 124;
+authorization matrix 113/113; authentication 42/42. Evidence:
+`PRODUCTION_SECURITY_REVIEW.md` §4.3.1.
 
-**PB-3: `react-router` advisory**
+### Gate 2 — Frontend Dependency Hardening — **COMPLETE**
 
-`react-router@7.18.1` is affected by a HIGH advisory (RSC-mode CSRF bypass).
-Assessed **not reachable**: SchoolCore uses declarative SPA mode across 29
-import sites, with no RSC runtime, no framework mode, no server actions and no
-SSR. The patched version exists in-range (`7.18.2`).
+**PB-3: `react-router` advisory — CLOSED**
 
-The blocker is a prerequisite gap, not the upgrade: the running frontend is a
-baked image `schoolcore-frontend:oauth-pages` and **its build definition is not
-in the repository**, so the upgrade cannot be built and deployed from source as
-the project currently stands.
+`react-router@7.18.1` was affected by a HIGH advisory (RSC-mode CSRF bypass).
+The blocker was a prerequisite gap: the build definition had been recorded as
+absent from the repository. It was not — `Dockerfile.frontend` is tracked, and
+the running image's history matches it layer for layer.
 
-**Objective.** Raise `react-router` to `>=7.18.2` and make the frontend
-reproducible from the repository.
+**Acceptance criteria — all met.**
 
-**Prerequisites.**
-- Gate 1 complete.
-- The frontend image build source located or reconstructed. If it cannot be
-  found, that is the finding, and it must be solved before the upgrade —
-  rebuilding frontend assets with an unknown or improvised build would be
-  worse than the advisory it is fixing.
+- [x] Frontend image build definition located and confirmed tracked
+- [x] `react-router` resolves to `>=7.18.2` (`7.18.4`); the HIGH advisory is gone
+- [x] No major version taken (`8.4.0` available, not used)
+- [x] CI green: install, typecheck, unit tests, lint, build (run #16 success)
+- [x] Image rebuilt from the committed source and validated in isolation before going live
+- [x] Deployed through the real path (Docker Compose), security posture preserved
+- [x] Frontend loads; auth pages, protected routes and navigation all serve — 200 on every SPA route, no blank pages, no broken redirects
+- [x] Asset inventory identical at 124 — no route or page added or removed
+- [x] Authorization matrix 113/113 and authentication 42/42 — PB-1 and PB-2 remain closed
+- [x] Production health checks pass after deploy
 
-**Acceptance criteria.**
-- Frontend image build definition is committed to the repository and produces
-  the served `dist/`.
-- `react-router` resolves to `>=7.18.2`; the HIGH advisory is gone from
-  `bun audit`.
-- CI green.
-- Frontend image rebuilt and deployed.
-- Frontend loads and authenticates end to end against the live deployment.
-- Public endpoint health checks pass.
-
-**Do not.** Ship a frontend image built from a definition that is not in the
-repository. If the build source cannot be recovered, stop and report it.
+**Two findings worth carrying forward.** The earlier "build definition not in
+the repository" claim was wrong and is corrected in
+`PRODUCTION_SECURITY_REVIEW.md` §4.3.1. And the frontend deploys through
+Docker Compose from a **host-managed** compose file, not `docker run` — the
+release workflow did not previously describe that path.
 
 ---
 
@@ -320,7 +323,7 @@ losing history.
 **Objective.** Make an explicit, evidence-backed decision on whether SchoolCore
 is ready for a pilot.
 
-**Prerequisites.** Gates 1–9 complete. **PB-3 must be closed** (PB-1 was closed in Gate 1).
+**Prerequisites.** Gates 1–9 complete. **All three pilot blockers are closed** (PB-1 in Gate 1, PB-2 in the completed remediations, PB-3 in Gate 2).
 
 **Acceptance criteria.**
 - Every gate's acceptance criteria evidenced and linked.

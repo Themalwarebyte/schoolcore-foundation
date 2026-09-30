@@ -388,7 +388,7 @@ actually reach the system.
 |---|---|---|---|
 | PB-1 | `@auth/core@0.37.4` CRITICAL + HIGH advisories (4.2) | CRITICAL (proven not reachable — see 4.2.1) | **CLOSED** — remediated in `d58f971`, see §4.2.1 |
 | PB-2 | `staff:get` authorization defect (4.1) | AUTHORIZATION DEFECT (moderate exposure) | **CLOSED** — remediated in `d9ba8b7`, see §4.1.1 |
-| PB-3 | `react-router@7.18.1` RSC CSRF (4.3) | HIGH (not reachable) | **OPEN** — raise to `>=7.18.2` in the next change that rebuilds and deploys the frontend image |
+| PB-3 | `react-router@7.18.1` RSC CSRF (4.3) | HIGH (proven not reachable — see 4.3.1) | **CLOSED** — remediated in `8f4b84f`, see §4.3.1 |
 
 Two further items are open but are **not** pilot blockers:
 
@@ -601,7 +601,111 @@ fixtures were disabled again afterwards.
 
 ---
 
-## 8. Security review status
+## 4.3.1 PB-3 remediation — `react-router` closed
+
+Remediated 2026-09-30. Deployed application commit
+**`8f4b84fcf1bdf6755033f60f0bf35bf1b5ab85f6`** (`8f4b84f`), CI run #16 success.
+Frontend image `schoolcore-frontend:8f4b84fcf1bdf6755033f60f0bf35bf1b5ab85f6`
+(id `cf776c902e3b`).
+
+**Build-chain discovery — a previous claim was wrong.** §4.3 recorded that the
+frontend build definition was "not in the repository". **It is in the
+repository**: `Dockerfile.frontend`, tracked at the repository root since
+`50b110c` (Phase 5A). Established by inspecting the running image rather than
+inferring from its name. The image history of
+`schoolcore-frontend:oauth-pages` (id `d42f2a0a6043`, built 2026-09-28T12:47:34)
+matches the Dockerfile layer for layer:
+
+| Image history step | `Dockerfile.frontend` |
+|---|---|
+| `LABEL org.opencontainers.image.title=schoolcore-frontend` | line 65 |
+| `EXPOSE [80/tcp]` | line 67 |
+| `HEALTHCHECK wget /healthz` | lines 70-71 |
+| `RUN rm -f /etc/nginx/conf.d/default.conf` | line 58 |
+| `COPY deploy/nginx-frontend.conf /etc/nginx/conf.d/default.conf` | line 59 |
+| `COPY /app/dist /usr/share/nginx/html` | line 62 |
+| base `nginx 1.29.8 alpine` | `NGINX_IMAGE`, digest-pinned line 24 |
+
+Both build inputs the Dockerfile references are tracked:
+`deploy/nginx-frontend.conf` and `.dockerignore`. The build is a plain
+two-stage `bun install --frozen-lockfile && bun run build`, then serve `dist`
+through nginx. **No workflow builds the frontend** — it is built deliberately
+on the host; the earlier image `schoolcore-frontend:df14e98` is tagged with the
+commit it was built from, which is the host's naming convention, not a CI
+artifact.
+
+**The real deployment path is Docker Compose, not `docker run`.** The running
+container carries `com.docker.compose.project: schoolcore` and
+`com.docker.compose.project.config_files: /opt/schoolcore/deploy/docker-compose.convex.yml`.
+The frontend service in that file pins the image tag, so the deploy is a
+compose re-create, not a hand-rolled start. The compose file is host-managed
+and is not in the repository.
+
+**Reachability, re-proven rather than carried forward.**
+
+| Question | Finding |
+|---|---|
+| React Router usage mode | Declarative SPA. `BrowserRouter`, `Routes`, `Route`, `Outlet`, `useNavigate`, `Link`, `NavLink`, `Navigate`, `useParams`, `useSearchParams`. |
+| React Server Components | **None.** No `unstable_rsc`, no `react-server`, and `@react-router/dev` — the package that provides framework mode and the RSC runtime — **is not installed at all**. |
+| SSR | **None.** No `renderToString`, `renderToPipeableStream` or `hydrateRoot`. `index.html` loads one module, `/src/main.tsx`, into `<div id="root">`; `vite.config.ts` declares no `ssr` entry and `build` is a plain `vite build`. |
+| Server actions | **None.** No `"use server"` anywhere in the source. |
+| Any server that could execute an action | **No.** The frontend container runs nginx only and serves static files. |
+| The vulnerable library in the shipped bundle | Yes — `react-router` is bundled in `assets/react-vendor-*.js`, as an ordinary client library listed in `optimizeDeps` and the `react-vendor` manual chunk. |
+
+GHSA-qwww-vcr4-c8h2 requires React Router's RSC mode. None of it is present,
+and the running artifact confirms it. **Not reachable, and now a proof from
+the build configuration and the running image.**
+
+**Change — the smallest available.**
+
+| | Before | After |
+|---|---|---|
+| `react-router` declared | `^7.10.0` | **`^7.18.4`** |
+| `react-router` installed | 7.18.1 | **7.18.4** |
+
+7.18.4 is the in-range update that clears the advisory, which requires
+`>=7.18.2`. `8.4.0` exists but is a major version and was not taken. The
+declared floor is tightened to `^7.18.4` so it cannot silently regress below
+the fix. **No other package moved**; `bun install --frozen-lockfile` reports no
+changes. `bun audit` on the same tree: **21 (17 high, 4 moderate) → 20 (16
+high, 4 moderate)** — the react-router HIGH is gone, nothing added.
+
+**Rebuild scope.** Every source change since the running image was built is
+either backend-only (`src/convex/**`) or a dependency manifest; no page,
+component, route, or Vite configuration changed. The rebuild shipped the
+intended dependency change and nothing else. It also brought the frontend's
+bundled `@convex-dev/auth` from 0.0.90 into line with the 0.0.95 running on
+the backend since PB-1 — a client/server version alignment that had been left
+out of step.
+
+**Validation.** The new image was validated **before** deployment as a
+throwaway container on the internal network with no published port, so the live
+service was never a test subject. It then went live via `docker compose up -d
+--no-deps --force-recreate schoolcore-frontend`, with the compose file backed
+up first.
+
+| Check | Result |
+|---|---|
+| Image healthcheck | `healthy` before and after deploy |
+| App shell | HTTP 200, title `SchoolCore Foundation` |
+| SPA deep routes (`/login`, `/activate`, `/reset-password`, `/staff`, `/students`, `/portal`, `/admin`) | 200 through the public edge — no blank pages, no broken redirects |
+| `/healthz` | 200 |
+| **Asset inventory** | **124 assets before, 124 after** — no route or page added or removed |
+| Served entry bundle | `assets/index-CClrQfZh.js`, matching the new image |
+| Container security posture | `cap_drop ALL`, `cap_add CHOWN/SETUID/SETGID/DAC_OVERRIDE`, read-only rootfs, `no-new-privileges`, **0** published ports — all preserved |
+| Authorization regression suite | **38 pass / 0 fail** |
+| Full authorization matrix | **113 pass / 0 fail / 0 retest** |
+| Authentication validation (PB-1 guard) | **42 pass / 0 fail** |
+| Public endpoints | frontend / API / OIDC / JWKS all HTTP 200 |
+| PostgreSQL, dashboard, ports | accepting connections · private · 0 published |
+| PB-1 and PB-2 | **remain closed** — `@auth/core 0.41.3`, `@convex-dev/auth 0.0.95`, `staff:get` gated on `staff.view` |
+| `/srv/platform`, Freebuff | untouched |
+
+Rollback targets preserved: image `schoolcore-frontend:pre-pb3-oauth-pages`
+(`d42f2a0a6043`, the exact image previously running) and compose file
+`docker-compose.convex.yml.bak-pb3`.
+
+---
 
 | Area | Status |
 |---|---|
@@ -611,13 +715,16 @@ fixtures were disabled again afterwards.
 | Production-reachable dependency findings | **FIXED** — Hono 4.12.27 → 4.13.11 |
 | `staff:get` defect | **FIXED** — `d9ba8b7`, PB-2 closed |
 | `@auth/core` advisories | **FIXED** — `d58f971`, PB-1 closed, the only CRITICAL eliminated |
+| `react-router` advisory | **FIXED** — `8f4b84f`, PB-3 closed; frontend build path established as `Dockerfile.frontend` |
+| Frontend build reproducibility | **ESTABLISHED** — build definition is tracked; deployed via Docker Compose; rebuild verified to a 124-asset match |
 | Off-site backup freshness signal | **FIXED** — `production-health.sh` read the oldest snapshot (`MONITORING_AND_ALERTING.md` §7.4) |
-| Dependency audit | **COMPLETE** — 21 open (17 high, 4 moderate), no critical; all triaged with disposition |
+| Dependency audit | **COMPLETE** — 20 open (16 high, 4 moderate), no critical, no high in a production-reachable package; all triaged |
 | Docker healthcheck review | **COMPLETE** — no change, external monitoring authoritative |
 | SSH hardening review | **COMPLETE** — no change, accepted risk |
 
-**8.6 security review: COMPLETE**. Of the three pilot blockers, **PB-1 and
-PB-2 are closed**; **PB-3 remains open and owned**. The dependency tree now
-carries **no CRITICAL advisory**.
+**8.6 security review: COMPLETE**. **All three pilot blockers — PB-1, PB-2 and
+PB-3 — are closed.** The dependency tree carries **no CRITICAL advisory**, and
+the remaining 20 are development-toolchain findings plus triaged items.
 
-Phase 8 remains **open**. This document does not claim Phase 8 complete.
+Phase 8 remains **open**. Gates 3–10 have not started, and this document does
+not claim Phase 8 complete.
