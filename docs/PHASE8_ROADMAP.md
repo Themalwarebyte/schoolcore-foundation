@@ -168,65 +168,54 @@ release workflow did not previously describe that path.
 
 ---
 
-### Gate 3 — Disaster Recovery — **INCOMPLETE**
+### Gate 3 — Disaster Recovery — **COMPLETE**
 
 **8.5**
 
-A full restore rehearsal was executed on 2026-09-30 against a real off-site
-snapshot (`2cee6972`, 3 hours old) in a fully isolated environment. Most of the
-procedure worked, and the rehearsal surfaced a **blocker the documentation did
-not anticipate**.
+Two rehearsals on 2026-09-30. The first found a blocker; the second proved the
+fix.
 
-**What passed.** Off-site retrieval with `--verify` (35 s); `sha256sum -c`
-integrity; PostgreSQL restore of the 3.2 MB dump (1 s); Convex backend start
-against the restored database (4 s); the recovered deployment serving real data
-— `schools:listSchools`, `team:me`, and `team:list` returning 14 correctly
-tenant-scoped users. Cross-tenant reads denied. PB-2's `staff:get` gate still
-holds on recovered data. The restored `JWT_PRIVATE_KEY` and `JWKS` are
-**fingerprint-identical** to live, so a restore preserves sessions rather than
-invalidating them. Database-only restore path: **~44 s**. Production was never
-a target; the rehearsal namespace was torn down and the backup repository is
-untouched (13 snapshots before and after).
+**First rehearsal — blocker found.** A database-only restore from a real
+off-site snapshot produced a deployment that started, answered `/version`,
+reported healthy, and then failed **every function call** with
+`Local dir storage couldn't open …/modules/<uuid>.blob`. The Convex backend
+keeps compiled function modules on a Docker volume that the backup did not
+capture, and the database holds only references to it. Every surface health
+check passed while the application was non-functional.
 
-**The blocker.** The backup contains the PostgreSQL dump but **not** the Convex
-backend's local storage volume (`convex-data` → `/convex/data/storage/modules/`,
-16 blobs / 10 MB in production). The database holds *references* to those
-blobs. A database-only restore therefore produces a deployment that starts,
-reports healthy, and **fails every function call** with
-`Local dir storage couldn't open …/modules/<uuid>.blob`. `convex deploy` also
-fails at `start_push` for the same reason.
+**Fix.** `backup.sh` now copies `convex-data:/storage` into the backup after
+`pg_dump` — later, so the capture is a superset of what the dump can reference —
+excluding `credentials/` (instance secret), and **fails the backup** if the
+capture is empty. The blobs inherit the same SHA256 manifest and the same restic
+encryption.
 
-This is the dangerous class of failure: every surface health check passes while
-the application is completely non-functional. **Until the volume is included in
-the backup, a total loss of `gman-02` is not recoverable from the backup
-alone.**
+**Second rehearsal — from the new backup only.** Snapshot `aad51574`, restored
+with no access to the live volume.
 
-**Three further gaps** found and now documented in `BACKUP_AND_RESTORE.md` §9.3:
-`INSTANCE_NAME` must match the restored database name or the backend exits;
-`pg_restore --clean` exits 1 on a fresh target even when it succeeds; and
-`deploy/.env` is not in the backup and must be re-supplied.
+| Acceptance criterion | Result |
+|---|---|
+| A real off-site snapshot retrieved | yes, `aad51574`, 13.1 MB |
+| Restored in an isolated environment | yes, separate network and volumes |
+| PostgreSQL starts | yes, 3 s, 8,227 documents |
+| Convex backend starts | yes, 3 s |
+| **No missing module/storage errors** | **0** |
+| Application functions execute | yes — `schools:listSchools`, `team:me` |
+| Representative data integrity | schools 8/8 · users 25/25 · students 91/91 · staff 21/21 · guardians 71/71 · memberships 23/23 · authAccounts 22/22 — **all match live** |
+| Authentication validated | **42 pass / 0 fail** |
+| Authorization checks | **8/8 as expected**, including PB-1 and PB-2 closures |
+| Security posture intact | 0 published ports, isolated network, no credentials in the backup |
+| Recovery timing recorded | **7 s** to serving, ~47 s from cold |
+| Documentation corrected | `BACKUP_AND_RESTORE.md` §2, §9.1–9.5 |
+| No production impact | SHA `8f4b84f` clean, all services up, 14 snapshots before and after, `restic check` clean |
 
-**Objective.** Make a full recovery possible from the backup alone.
+**One further finding.** The restored env store carries the production
+`CONVEX_SITE_URL`, so a recovered backend started on a different site origin
+mints tokens the auth provider will not accept (`NoAuthProvider`). Free on a
+real recovery, but a sharp edge in rehearsals. Documented in §9.3.
 
-**Prerequisites.** None outstanding; the findings are complete.
-
-**Acceptance criteria — 9 of 11 met.**
-
-- [x] A real off-site snapshot was retrieved
-- [x] Restore performed in an isolated environment
-- [x] Restored services started successfully — *with the storage volume supplied*
-- [x] Application health checks passed on recovered data
-- [x] Authentication validated (sign-in path, session resolution, disabled-account refusal)
-- [x] Representative data integrity confirmed (every entity count matches live; zero orphans)
-- [x] Security posture verified (no public exposure, 0 ports, tenant isolation intact)
-- [x] Recovery timing recorded
-- [x] Documentation corrected from actual experience
-- [x] No production impact occurred
-- [ ] **Backup includes the Convex storage volume, and a fresh backup restores into a working deployment with no manual volume copy** — the blocker above
-
-The tenth criterion is the one that cannot be met without a change to the
-backup implementation, which is out of scope for this gate. Gate 3 is therefore
-**not complete**, and Gate 10 must not treat it as such.
+**Gate 3 is complete.** Two recovery inputs remain outside the backup and are
+documented as such: the Restic password with the rclone OAuth config, and
+`/opt/schoolcore/deploy/.env`. Both are custody questions, not software defects.
 
 ---
 
