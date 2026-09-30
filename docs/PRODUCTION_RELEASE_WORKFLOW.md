@@ -147,9 +147,14 @@ must be read to confirm them:
 | Off-site copy uploaded | `offsite : ok snapshot=<id> upload_seconds=N` |
 | Retention applied | `retention: applied` |
 | Independent health verdict | `sudo /opt/schoolcore/scripts/backup-health.sh` ends `BACKUP HEALTH: HEALTHY` |
+| `<id>` is the snapshot this run created | `manifests/restic-snapshot-id.txt` in the new backup directory equals `<id>`, and it is the newest snapshot in the repository |
 
 `backup-health.sh` is deliberately a separate script so backup health is not
-graded by the same process that created the backup.
+graded by the same process that created the backup. Note that it answers a
+different question from the off-site freshness check in `production-health.sh`,
+and the two did disagree while the latter was defective — see
+`MONITORING_AND_ALERTING.md` §7.4. A `HEALTHY` verdict from `backup-health.sh`
+does not by itself prove off-site freshness.
 
 During the authorization fix the local snapshot `20260929-201658` (3.1 MB,
 8 files, SHA256 manifest written, off-site upload confirmed) was the gate for

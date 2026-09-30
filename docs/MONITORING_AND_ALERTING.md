@@ -73,6 +73,7 @@ the verdict to `/opt/schoolcore/logs/health.state`.
 | Data tier | PostgreSQL accepting connections; Convex backend serving; no sqlite fallback |
 | Host | Disk usage, inode usage, available RAM, load average, swap, docker disk |
 | Backups | Delegates to `backup-health.sh` and requires a `HEALTHY` verdict |
+| Off-site freshness | Age of the **newest** snapshot in the off-site Restic repository (§3.1) |
 | Containers | Every SchoolCore container must be in `running` state |
 
 **Thresholds.** The resource checks warn on host pressure — disk, inodes,
@@ -83,6 +84,41 @@ deliberately strict threshold and worth knowing when interpreting a `DEGRADED`
 verdict: a few tens of megabytes of cold pages parked in swap, with
 `vmstat` showing `si=0 so=0` and ample free RAM, is not an incident. The
 authoritative confirmation of that is `vmstat`, not the health verdict.
+
+### 3.1 Off-site backup freshness — what the signal means
+
+**Definition.** Freshness is the age, in whole hours, of the **newest snapshot
+in the off-site Restic repository**, read from an unfiltered
+`restic snapshots --json` listing. One hour of run time is deliberately
+discarded by the integer division, so a snapshot up to 60 minutes old reads as
+`0h`.
+
+**The operational question it answers:** *has a recent off-site backup
+completed, and does it still exist in the repository?* The signal is
+content-level — the timestamp can only exist because data actually landed in
+the off-site repository — so it cannot be advanced by a script merely claiming
+success. It also fails closed: if the repository is unreachable the check warns
+rather than passing.
+
+**Thresholds.**
+
+| Condition | Result |
+|---|---|
+| Newest snapshot ≤ 36h old | `OK` |
+| Newest snapshot > 36h old | `CRITICAL` |
+| Repository unreadable, malformed output, **or no snapshots at all** | `WARN` |
+
+**36 hours** is unchanged and was deliberately *not* raised. It is ~1.5× the
+24h backup interval, so one missed run degrades but does not page, and two
+consecutive misses page. The control was not weakened to resolve the defect in
+§7.4 — the reading was wrong, and the threshold was always right.
+
+**Do not reintroduce `restic snapshots --latest 1` for this purpose.** restic's
+`--latest` returns the latest snapshot *per host and paths group*, not the
+single newest overall. Each SchoolCore backup uses a unique timestamped
+directory, so every snapshot is its own group, `--latest 1` returns the entire
+repository, and taking element `0` measures the **oldest** snapshot. That is
+exactly the defect in §7.4. Use `max(time)` over the unfiltered listing.
 
 ---
 
@@ -278,6 +314,85 @@ transport proves the pipe works, not that the system speaks.
 Backups retained: `production-alert.sh.bak-p8pref` (pre state-parsing fix) and
 `production-alert.sh.bak-p8prejson` (pre JSON-escaping fix).
 
+### 7.4 Off-site backup freshness read the oldest snapshot, not the newest (CRITICAL, fixed)
+
+Found on 2026-09-30, after the 8.4 work. Production health had moved from
+`DEGRADED` to `CRITICAL` with a real alert delivered
+(`alert sent: SchoolCore CRITICAL`), while every scheduled backup was
+succeeding and reporting `offsite : ok`.
+
+**Root cause.** The freshness check derived its signal with:
+
+```bash
+restic snapshots --latest 1 --json | python3 -c "... t=d[0]['time'] ..."
+```
+
+Two mistakes compounded:
+
+1. **`--latest` is per-group, not global.** restic's `--latest n` returns the
+   `n` latest snapshots **for each host and paths combination**. Every
+   SchoolCore backup uses a unique timestamped directory
+   (`/opt/schoolcore/backups/<timestamp>`), so every snapshot is its own group
+   and `--latest 1` returns *the entire repository*, not one snapshot.
+   Measured: `--latest 1` returned **10 snapshots across 10 distinct paths**.
+2. **Element `0` is the oldest.** The listing is ascending by time, so `d[0]`
+   was the *oldest* snapshot in the repository, not the newest.
+
+The check therefore measured the age of the first backup ever taken
+(`7490fcbf`, 2026-09-28T14:47) while real backups were landing hourly. It
+crossed the 36h threshold and stayed crossed, permanently.
+
+**`backup.sh` had the identical bug.** It derived the reported snapshot id the
+same way, so **every** backup log line and every
+`manifests/restic-snapshot-id.txt` recorded `7490fcbf` — a snapshot from two
+days earlier — rather than the snapshot that run had just created. The backup
+evidence trail was misreporting which snapshot corresponded to which backup.
+
+An earlier working hypothesis attributed this to Restic content
+deduplication. **That was wrong**, and is recorded here so the mistake is not
+repeated: there was no deduplication involved. All 10 backups produced 10
+distinct snapshots with 10 distinct paths. The query was reading the wrong
+element of a list it was mistakenly treating as length-1.
+
+**Fix.**
+
+- `production-health.sh` — read the unfiltered `restic snapshots --json` and
+  select `max(time)`. Threshold unchanged at 36h.
+- `production-health.sh` — the parser prints `none` for an empty snapshot list,
+  but the `case` only matched `''|err`, so `none` fell through to the numeric
+  comparison, `[ "none" -gt 36 ]` failed, and the `||` branch reported `OK`.
+  **An off-site repository with zero snapshots read as healthy.** `none` now
+  routes to the same `WARN` arm as `''` and `err`.
+- `backup.sh` — take `max(time)` for the reported snapshot id. The existing
+  `flock` rules out a concurrent run winning that race, so the newest snapshot
+  immediately after a successful `restic backup` is the one that run created.
+
+Not done deliberately: the 36h threshold was **not** raised and `CRITICAL` was
+**not** downgraded. The reading was wrong, not the threshold.
+
+**Validation.**
+
+| Check | Method | Result |
+|---|---|---|
+| Fresh states recognised as fresh | Live health check against real repository | `OK latest off-site snapshot 0h old` after a real run; `6h old` before |
+| Threshold boundaries | Synthetic single-snapshot fixtures through the verbatim live parser and comparison | 0/1/6/12/24/35/36h → `OK`; 37/48/72/200/1000h → `CRITICAL`; all 14 as expected |
+| Repository failure | Synthetic empty list and malformed output | Both `WARN`, never `OK` |
+| Old vs new reading | Same real repository listing through both expressions | old `d[0]` → 42h → `CRITICAL`; new `max(time)` → 6h → `OK` |
+| Reported snapshot id | Real `backup.sh` run | reported `7e529cc7` = actual newest; `manifests/restic-snapshot-id.txt` also `7e529cc7` |
+| Repository integrity | `restic check` and `restic check --read-data-subset=1/20` | `no errors were found` on both; snapshot count 10 before and after |
+| Recoverability | `restic ls latest` | Newest snapshot lists `SHA256SUMS`, `convex/`, `docs/RESTORE.txt`, `manifests/` |
+| No snapshots removed | Snapshot list after the run | All 10 pre-existing ids still `PRESENT`; count 10 → 11 (one new) |
+| Alerting | Observed live transition + simulated branches | `CRITICAL → DEGRADED` sent one alert; repeat runs `within cooldown - not re-alerting` |
+
+A stale Restic lock was found blocking verification, with its owning PID
+confirmed dead and no restic process running. `restic unlock` (stale locks
+only, by default) removed the two stale locks; without that, the next
+scheduled backup would have failed on the locked repository.
+
+Backups retained: `production-health.sh.bak-p8backupfix` and
+`backup.sh.bak-p8backupfix` (pre-fix), plus
+`production-health.sh.bak-p8nonestatus` (intermediate, before the `none` arm).
+
 ---
 
 ## 8. Known gaps
@@ -288,7 +403,9 @@ Backups retained: `production-alert.sh.bak-p8pref` (pre state-parsing fix) and
 | No explicit journald `MaxRetentionSec` | Journal growth governed by host defaults | Resolve with the archive policy |
 | Alert destination is a single mailbox with no secondary | One mailbox failure means silent loss | Add a secondary destination in the 8.12 runbook |
 | No alerting on `backup-health.sh` in isolation | Covered via the main health check, but not independently | Acceptable; note for the runbook |
+| `backup-health.sh` and the off-site freshness check are independent and did disagree | During the §7.4 defect, `backup-health.sh` reported `HEALTHY` while `production-health.sh` reported `CRITICAL` on the same repository. The two checks answer different questions, but a divergence between them is not itself detected | Consider having `backup-health.sh` surface the off-site age so the two agree by construction — not required, recorded for 8.12 |
 | Health check is host-local | A host-level outage is invisible to this system | Resolve in 8.5 DR with external monitoring |
+| Stale Restic locks block `restic check` and the next `restic backup` | A lock left by an interrupted object-store operation blocks the next scheduled backup until cleared. `backup.sh` clears locks only as part of its own `forget` retry, which is reached only *after* `restic backup` has already failed | Consider a stale-lock sweep before the backup step, or an age threshold on lock files. Observed 2026-09-30; cleared with `restic unlock` |
 
 ---
 
@@ -296,5 +413,12 @@ Backups retained: `production-alert.sh.bak-p8pref` (pre state-parsing fix) and
 
 Monitoring and alerting documentation: **COMPLETE**.
 
-The system was verified end to end during this work, and two critical defects
-in the alerting path were found and fixed as a result.
+The system has been verified end to end, and **three** critical defects were
+found and fixed while producing these documents: two in the alerting path
+(§7.1 state parsing, §7.2 JSON escaping) and one in the off-site backup
+freshness signal (§7.4).
+
+In each case the transport-level or high-level signal looked healthy while the
+control underneath it was broken. That is the recurring lesson of this section:
+a green component is not a green control, and the only thing that catches it is
+exercising the control's own decision path.
