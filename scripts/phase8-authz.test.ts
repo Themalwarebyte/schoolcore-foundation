@@ -17,11 +17,13 @@
  * the CLI `--identity` flag is the validated mechanism already used by
  * /opt/schoolcore/scripts/authz-harness.sh. Nothing here fabricates a token.
  *
- * The defect under regression: students:get, students:stats and students:recent
- * gated on session presence only (getSession / requireSchoolSession) instead of
- * the students.view permission, so a parent or student could read other
- * students inside their own school. Every DENY case below returned ALLOWED
- * before the fix.
+ * The defects under regression:
+ *   students:get / students:stats / students:recent gated on session presence
+ *   only, so a parent or student could read other students inside their own
+ *   school. Fixed in db1fe52.
+ *   staff:get gated on session presence only, so a parent or student could
+ *   read an individual staff record. Fixed in the PB-2 remediation.
+ * Every DENY case in those groups returned ALLOWED before the fix.
  */
 import { describe, expect, test, beforeAll } from "bun:test";
 import { spawnSync } from "node:child_process";
@@ -37,6 +39,8 @@ type Ids = {
   ownChild: string;
   otherSameSchool: string;
   crossSchool: string;
+  gfStaff: string;
+  rvStaff: string;
 };
 
 const URL_ = process.env.CONVEX_SELF_HOSTED_URL;
@@ -62,6 +66,7 @@ const DENIALS = [
   "You do not have permission to perform this action.",
   "You do not have access to this school.",
   "You do not have access to this student.",
+  "You do not have access to this staff member.",
   "This student is not linked to your account.",
   "Student not found in your school.",
   "No parent portal link found for this account.",
@@ -197,5 +202,76 @@ describe("platform super admin", () => {
   });
   test("is denied the recent roster without a school context (unchanged)", () => {
     expect(run("students:recent", {}, IDS.platform)).toBe("DENIED");
+  });
+});
+
+/**
+ * PB-2 — staff:get authorization defect.
+ *
+ * staff:get used bare getSession() plus a tenant check, so any signed-in
+ * account with a school membership could read an individual staff record.
+ * The adjacent handlers staff:list, staff:stats and staff:departments all
+ * require "staff.view", which the parent and student roles do not hold, so the
+ * omission made staff:get the one staff read path with no role gate at all.
+ *
+ * The parent and student cases below returned ALLOWED before the fix.
+ */
+describe("school admin — staff records", () => {
+  test("reads a staff record in its own school", () => {
+    expect(run("staff:get", { staffId: IDS.gfStaff }, IDS.gfAdmin)).toBe("ALLOWED");
+  });
+  test("is denied a staff record in another school", () => {
+    expect(run("staff:get", { staffId: IDS.rvStaff }, IDS.gfAdmin)).toBe("DENIED");
+  });
+  test("still reads the staff roster and stats", () => {
+    expect(run("staff:list", PAG, IDS.gfAdmin)).toBe("ALLOWED");
+    expect(run("staff:stats", {}, IDS.gfAdmin)).toBe("ALLOWED");
+  });
+});
+
+describe("teacher — staff records (holds staff.view)", () => {
+  test("reads a staff record in its own school", () => {
+    expect(run("staff:get", { staffId: IDS.gfStaff }, IDS.teacher)).toBe("ALLOWED");
+  });
+  test("is denied a staff record in another school", () => {
+    expect(run("staff:get", { staffId: IDS.rvStaff }, IDS.teacher)).toBe("DENIED");
+  });
+});
+
+describe("parent — staff records", () => {
+  test("CANNOT read a staff record in its own school", () => {
+    expect(run("staff:get", { staffId: IDS.gfStaff }, IDS.parent)).toBe("DENIED");
+  });
+  test("is denied the staff roster and stats (unchanged)", () => {
+    expect(run("staff:list", PAG, IDS.parent)).toBe("DENIED");
+    expect(run("staff:stats", {}, IDS.parent)).toBe("DENIED");
+  });
+});
+
+describe("student — staff records", () => {
+  test("CANNOT read a staff record in its own school", () => {
+    expect(run("staff:get", { staffId: IDS.gfStaff }, IDS.studentA)).toBe("DENIED");
+  });
+  test("is denied the staff roster (unchanged)", () => {
+    expect(run("staff:list", PAG, IDS.studentA)).toBe("DENIED");
+  });
+});
+
+describe("anonymous — staff records", () => {
+  test("is denied staff:get", () => {
+    expect(run("staff:get", { staffId: IDS.gfStaff })).toBe("DENIED");
+  });
+  test("is denied the staff roster", () => {
+    expect(run("staff:list", PAG)).toBe("DENIED");
+  });
+});
+
+describe("platform super admin — staff records", () => {
+  test("is denied a staff record without a school context (unchanged)", () => {
+    // Deliberately preserved. Cross-school platform reach is provided by the
+    // explicitly-named platform endpoints (platform:*, schools:listSchools,
+    // phase7/access:accessOverview); widening this school-scoped handler
+    // would invent a new global-access model.
+    expect(run("staff:get", { staffId: IDS.gfStaff }, IDS.platform)).toBe("DENIED");
   });
 });

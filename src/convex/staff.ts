@@ -2,7 +2,7 @@ import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { getSession, requirePermission, getSchoolRecord } from "./session";
+import { requirePermission, getSchoolRecord } from "./session";
 import { recordAudit } from "./audit";
 
 /* ------------------------------------------------------------------ */
@@ -52,7 +52,13 @@ export const list = query({
 export const get = query({
   args: { staffId: v.id("staff") },
   handler: async (ctx, { staffId }) => {
-    const session = await getSession(ctx);
+    // Require staff.view, matching staff:list, staff:stats and
+    // staff:departments. This handler previously used bare getSession() plus
+    // the tenant check below, which made it the one staff read path with no
+    // role gate: any signed-in account holding a school membership - including
+    // parent and student, neither of which holds staff.view - could read an
+    // individual staff record. The tenant boundary below is unchanged.
+    const session = await requirePermission(ctx, "staff.view");
     const member = await ctx.db.get(staffId);
     if (!member) throw new ConvexError("Staff member not found.");
     if (member.schoolId !== session.schoolId) {
