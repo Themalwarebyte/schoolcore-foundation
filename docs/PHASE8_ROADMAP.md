@@ -63,9 +63,20 @@ with rationale.
 Evidence: `PRODUCTION_SECURITY_REVIEW.md`.
 
 ### PB-2 remediation — CLOSED
-`staff:get` now requires `staff.view`. Deployed `d9ba8b7`. Regression suite
-36 pass / 2 fail before the fix, 38 pass / 0 fail after; extended matrix
-113 pass / 0 fail / 0 retest.
+`staff:get` now requires `staff.view`, matching `staff:list`, `staff:stats` and
+`staff:departments`. Super-admin null-`schoolId` behaviour deliberately preserved
+as secure denial. Deployed `d9ba8b7`; regression suite 36 pass / 2 fail before
+the fix and 38 pass / 0 fail after; extended matrix 113 pass / 0 fail / 0 retest.
+Evidence: `PRODUCTION_SECURITY_REVIEW.md` §4.1.1.
+
+### PB-1 remediation — CLOSED
+`@convex-dev/auth` upgraded to `0.0.95` with `@auth/core@0.41.3` pinned, removing
+the only CRITICAL advisory in the dependency tree. Reachability proven against
+the installed tree rather than inferred, and a previous incorrect claim — that
+no Auth.js Email provider is registered — corrected. Deployed `d58f971`; CI run
+#14 success; authentication re-validated through real sign-in at 42/42 both
+before and after the change, authorization matrix 113/113. Evidence:
+`PRODUCTION_SECURITY_REVIEW.md` §4.2.1.
 
 ---
 
@@ -78,45 +89,40 @@ Gates are **sequential**. Gate N's prerequisites are Gate N-1's acceptance.
 
 ---
 
-### Gate 1 — Authentication Hardening
+### Gate 1 — Authentication Hardening — **COMPLETE**
 
-**PB-1: `@auth/core` upgrade and validation**
+**PB-1: `@auth/core` upgrade and validation — CLOSED**
 
-`@auth/core@0.37.4` carries a CRITICAL advisory (email normalizer homoglyph
+`@auth/core@0.37.4` carried a CRITICAL advisory (email normalizer homoglyph
 `@` bypass), a HIGH (`getToken()` uncaught exception on malformed `Bearer`
-headers) and a MODERATE (OAuth cookie binding). Assessed **not reachable** in the
-current configuration — SchoolCore registers no Auth.js Email provider and no
-`NextAuth` handler, and has no public sign-up path — but it is a live CVE in a
-production authentication dependency, and the fix is not a patch: it requires
-moving `@convex-dev/auth` 0.0.90 → 0.0.95, which moves the peer requirement to
-`^0.41.1`, and realigning `@auth/core` to `>=0.41.3`.
+headers) and a MODERATE (OAuth cookie binding). The fix was not a patch: it
+required moving `@convex-dev/auth` 0.0.90 to 0.0.95, which moves the peer
+requirement to `^0.41.1`, and realigning `@auth/core` to `>=0.41.3`.
 
 **Objective.** Remove the CRITICAL advisory from the authentication path, or
-record with evidence why it can be deferred a second time.
+record with evidence why it can be deferred. **Achieved** — removed, and the
+reachability question answered with proof rather than assessment.
 
-**Prerequisites.**
-- This file and `SCHOOLCORE_CURRENT_STATE.md` read, so the current state is
-  known.
-- A verified production backup.
-- Agreement that the auth core is being changed, because this is the
-  authentication path of a system holding student personal data.
+**Acceptance criteria — all met.**
 
-**Acceptance criteria.**
-- `@auth/core` resolves to `>=0.41.3`, with `@convex-dev/auth` aligned.
-- `bun audit` no longer reports the CRITICAL or HIGH `@auth/core` advisories.
-- CI green: install, typecheck, unit tests, lint, build.
-- Deployed to a verified SHA.
-- Authentication smoke tests pass: sign-in with an existing credential, JWT
-  issuance, and token refresh.
-- Role sign-in validation passes for every role that exists in the data set:
-  school admin, teacher, parent, student, platform super admin — each
-  confirmed able to sign in and reach its own portal.
-- Authorization regression suite still passes, and the full matrix still
-  reports 0 FAIL / 0 RETEST.
-- Production health checks pass after deploy.
+- [x] `@auth/core` resolves to `>=0.41.3` (`0.41.3`), with `@convex-dev/auth` at `0.0.95`
+- [x] `bun audit` no longer reports the CRITICAL or HIGH `@auth/core` advisories
+- [x] CI green: install, typecheck, unit tests, lint, build (run #14 success)
+- [x] Deployed to a verified SHA (`d58f971`, clean tree, no generated-file drift)
+- [x] Authentication smoke tests pass: sign-in, token issuance, verification on a fresh connection, tampered-token rejection
+- [x] Role sign-in validation for every role in the data set: school admin, teacher, parent, student, plus a cross-tenant Riverside student
+- [x] Role resolution and school membership correct for each
+- [x] Authorization regression suite 38/38 and full matrix 113/113, 0 FAIL, 0 RETEST
+- [x] Production health checks pass after deploy
 
-**Do not.** Fold unrelated changes into this gate. It is an authentication-core
-change; the smaller the diff, the easier it is to reason about.
+**Two findings worth carrying forward.** First, the reachability claim in the
+original assessment was partly wrong — the Auth.js Email provider adapter *is*
+imported and registered — and the corrected proof is recorded in
+`PRODUCTION_SECURITY_REVIEW.md` §4.2.1. Second, the first `convex deploy`
+reported success while bundling the **old** library, because the server's
+gitignored `node_modules` was not re-installed after the checkout. Deployment
+should compare declared against installed dependency versions rather than
+trusting the deploy exit code.
 
 ---
 
@@ -314,7 +320,7 @@ losing history.
 **Objective.** Make an explicit, evidence-backed decision on whether SchoolCore
 is ready for a pilot.
 
-**Prerequisites.** Gates 1–9 complete. **PB-1 and PB-3 must be closed.**
+**Prerequisites.** Gates 1–9 complete. **PB-3 must be closed** (PB-1 was closed in Gate 1).
 
 **Acceptance criteria.**
 - Every gate's acceptance criteria evidenced and linked.

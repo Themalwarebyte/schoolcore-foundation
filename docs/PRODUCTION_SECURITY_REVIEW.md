@@ -386,7 +386,7 @@ actually reach the system.
 
 | # | Blocker | Severity | Required before pilot |
 |---|---|---|---|
-| PB-1 | `@auth/core@0.37.4` CRITICAL + HIGH advisories (4.2) | CRITICAL (not reachable in current configuration) | **OPEN** — upgrade `@convex-dev/auth` to `0.0.95` and realign `@auth/core` to `>=0.41.3`; validate with a full authentication smoke pass |
+| PB-1 | `@auth/core@0.37.4` CRITICAL + HIGH advisories (4.2) | CRITICAL (proven not reachable — see 4.2.1) | **CLOSED** — remediated in `d58f971`, see §4.2.1 |
 | PB-2 | `staff:get` authorization defect (4.1) | AUTHORIZATION DEFECT (moderate exposure) | **CLOSED** — remediated in `d9ba8b7`, see §4.1.1 |
 | PB-3 | `react-router@7.18.1` RSC CSRF (4.3) | HIGH (not reachable) | **OPEN** — raise to `>=7.18.2` in the next change that rebuilds and deploys the frontend image |
 
@@ -502,21 +502,122 @@ because changing it would mean inventing a cross-school access model.
 
 ---
 
+## 4.2.1 PB-1 remediation — `@auth/core` closed
+
+Remediated 2026-09-30. Deployed commit **`d58f9719c24e6e4f1d0214007af25d0b90f9e237`**,
+branch `selfhost-production`, CI run #14 success.
+
+**Dependency chain, established rather than assumed.** `@auth/core` is a
+**peer** dependency, not a regular one:
+
+```
+@auth/core@0.37.4
+  └─ peer @convex-dev/auth@0.0.90 (requires ^0.37.0)
+```
+
+`@convex-dev/auth` ships its own JWT stack (`jose`, `lucia`, `jwt-decode`) and
+lists `@auth/core` only as a peer, so the vulnerable version was auto-installed
+to satisfy the peer rather than being depended on for any functionality.
+
+**Reachability proven, and the previous assessment corrected.** §4.2 concluded
+the advisories were not reachable partly because "no Auth.js Email provider is
+registered". **That was wrong.** `src/convex/auth/emailOtp.ts:1` imports
+`@convex-dev/auth/providers/Email`, and that provider *is* registered in
+`auth.ts:61`. The corrected picture, from the installed tree:
+
+| Advisory | Severity | Finding |
+|---|---|---|
+| GHSA-7rqj-j65f-68wh homoglyph email bypass | CRITICAL | Not reachable. `@auth/core`'s runtime exports are `Auth, createActionURL, customFetch, isAuthAction, raw, setEnvDefaults, skipCSRFCheck` — no email normalizer is exported, and `dist/providers/Email.js` has **zero** `@auth/core` references, so the registered provider does not traverse `@auth/core` at all. Convex Auth implements the Email provider itself. |
+| GHSA-xmf8-cvqr-rfgj `getToken()` crash | HIGH | Not reachable. `getToken` ships in `@auth/core/src/jwt.ts` but is invoked only from `@convex-dev/auth/dist/nextjs/`, an entrypoint SchoolCore does not import. |
+| OAuth cookie binding | MODERATE | Not reachable. The only OAuth code is `dist/server/oauth/convexAuth.js` for the OAuth provider; SchoolCore's providers are a self-issued OIDC entry and an optional `customJwt` Freebuff provider. |
+
+The entire `@convex-dev/auth` package imports exactly **one** symbol from
+`@auth/core`: `setEnvDefaults`, called once at
+`dist/server/provider_utils.js:59` with `(process.env, config)` — an
+env-defaults helper unrelated to any of the three advisories. No source file
+imports `@auth/core`, `jose` or `NextAuth`.
+
+Independently, sign-up is unreachable: `auth.ts:22` throws unless
+`flow === "signIn"`, so accounts can only be created by an administrator. The
+CRITICAL advisory requires an attacker-created account to exploit.
+
+**Change.**
+
+| Package | Before | After |
+|---|---|---|
+| `@convex-dev/auth` | `^0.0.90` | `0.0.95` |
+| `@auth/core` | peer, auto-installed `0.37.4` | **`0.41.3`, pinned as a direct dependency** |
+
+`@auth/core` is pinned explicitly so the peer is controlled rather than
+auto-installed. `@convex-dev/auth@0.0.95` was checked before applying:
+identical runtime dependency set, identical exports map, peer `convex ^1.17.0`
+(we have 1.46.0). Only the `@auth/core` peer moved, `^0.37.0` → `^0.41.1`, and
+`react` became an optional peer.
+
+`bun audit` on the same tree, before → after: **24 vulnerabilities (1 critical,
+18 high, 5 moderate) → 21 (17 high, 4 moderate)**. The only critical
+eliminated; nothing added. `bun install --frozen-lockfile` reports no changes
+and no unsatisfied peer.
+
+The `jose` major movement in the lockfile is `@auth/core`'s own requirement
+(`jose ^6.0.6`), not a change to any direct dependency: `jose` is not declared
+in `package.json` and is imported by no source file. It resolves as
+`jose@6.2.12` for `@auth/core` while `@convex-dev/auth` retains its nested
+`jose@5.10.0`.
+
+**A deployment trap, found and corrected.** The first `convex deploy` after
+this change reported success but bundled the **old** library: the server's git
+checkout had updated `package.json` and `bun.lock`, but `node_modules` is
+gitignored and was never re-installed, so the bundler read `0.0.90` from disk.
+The mismatch was caught by comparing declared against installed versions on the
+host rather than trusting the deploy exit code. `node_modules` was re-synced
+from the committed lockfile and the deploy re-run; the deployed
+`node_modules/@convex-dev/auth` now reads `0.0.95` and `@auth/core` `0.41.3`.
+**Deployment discipline should compare declared against installed dependency
+versions before trusting a deploy.**
+
+**Validation.** Authentication was exercised through the **real** sign-in action
+(`anyApi.auth.signIn`), not `convex run --identity`, because the point is to
+prove the library change did not break credential verification. 42 assertions
+across five roles — school admin, teacher, parent, student, and a Riverside
+student for cross-tenant scope — covering token issuance, session resolution,
+role resolution, school membership, wrong-password rejection, unknown-account
+rejection, token verification on a fresh connection, tampered-token rejection,
+OIDC discovery, JWKS, and anonymous access.
+
+| Stage | Result |
+|---|---|
+| Authentication validation, **pre-deploy** (old auth) | **42 pass / 0 fail** |
+| Authentication validation, **post-deploy** (upgraded auth) | **42 pass / 0 fail** — identical |
+| Authorization regression suite | **38 pass / 0 fail** |
+| Full authorization matrix | **113 pass / 0 fail / 0 retest** |
+| Production endpoints | frontend / API / OIDC / JWKS all HTTP 200 |
+| PostgreSQL, dashboard, ports | accepting connections · private · 0 published |
+| Deployed | `d58f971`, clean tree, no generated-file drift |
+
+A `P8-AUTHZ-ADMIN-A` school-admin fixture was created for this validation
+because the seeded school-admin password was rotated and is not known. All five
+fixtures were disabled again afterwards.
+
+---
+
 ## 8. Security review status
 
 | Area | Status |
 |---|---|
-| Role authorization matrix | **COMPLETE** — 100/100, no unverified category |
+| Role authorization matrix | **COMPLETE** — 113/113 including the PB-2 staff rows, no unverified category |
 | Student horizontal access defect | **FIXED** — `db1fe52` |
 | Production alerting path | **FIXED** — two defects, verified end to end |
 | Production-reachable dependency findings | **FIXED** — Hono 4.12.27 → 4.13.11 |
 | `staff:get` defect | **FIXED** — `d9ba8b7`, PB-2 closed |
+| `@auth/core` advisories | **FIXED** — `d58f971`, PB-1 closed, the only CRITICAL eliminated |
 | Off-site backup freshness signal | **FIXED** — `production-health.sh` read the oldest snapshot (`MONITORING_AND_ALERTING.md` §7.4) |
-| Dependency audit | **COMPLETE** — 18 open, all triaged with disposition |
+| Dependency audit | **COMPLETE** — 21 open (17 high, 4 moderate), no critical; all triaged with disposition |
 | Docker healthcheck review | **COMPLETE** — no change, external monitoring authoritative |
 | SSH hardening review | **COMPLETE** — no change, accepted risk |
 
-**8.6 security review: COMPLETE**. Of the three pilot blockers, **PB-2 is
-closed**; PB-1 and PB-3 remain open and owned.
+**8.6 security review: COMPLETE**. Of the three pilot blockers, **PB-1 and
+PB-2 are closed**; **PB-3 remains open and owned**. The dependency tree now
+carries **no CRITICAL advisory**.
 
 Phase 8 remains **open**. This document does not claim Phase 8 complete.

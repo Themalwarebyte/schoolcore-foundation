@@ -19,10 +19,10 @@ For what still has to happen, see `PHASE8_ROADMAP.md`.
 |---|---|
 | **Migration** | **COMPLETE and accepted.** Cutover 2026-09-29, owner browser acceptance recorded (`MIGRATION_STATUS.md` §"Phase 6B/7 - PRODUCTION CUTOVER COMPLETED"). Phases 0–7 are closed. |
 | **Production** | **LIVE on self-hosted infrastructure** at `gman-02`, serving production traffic. |
-| **Current deployed application SHA** | **`d9ba8b7330bc69cc34408f799f285cb13b57bde7`** (`d9ba8b7`) — the PB-2 `staff:get` authorization fix |
+| **Current deployed application SHA** | **`d58f9719c24e6e4f1d0214007af25d0b90f9e237`** (`d58f971`) — the PB-1 `@auth/core` authentication hardening |
 | **Current branch** | `selfhost-production` — the production branch, CI-gated, deployed by exact SHA |
 | **Current phase** | **Phase 8 — Production Hardening and Pilot Readiness. Phase 8 is OPEN.** |
-| **Pilot readiness** | **NOT ready.** 2 of 3 recorded pilot blockers remain open (PB-1, PB-3). Phase 8 gates 3–10 have not started. |
+| **Pilot readiness** | **NOT ready.** PB-3 remains open. Phase 8 Gate 1 is complete; gates 2–10 have not started. |
 
 ### On the deployed SHA and the branch HEAD
 
@@ -124,7 +124,7 @@ why this record was created.
 
 | ID | Issue | Status | Owner / Next Action |
 |---|---|---|---|
-| **PB-1** | `@auth/core@0.37.4` — CRITICAL (GHSA-7rqj-j65f-68wh, homoglyph email bypass), HIGH (GHSA-xmf8-cvqr-rfgj), MODERATE. Assessed **not reachable**: SchoolCore registers no Auth.js Email provider and no `NextAuth` handler, and has no public sign-up path. | **OPEN** | Upgrade `@convex-dev/auth` 0.0.90 → 0.0.95 and realign `@auth/core` to `>=0.41.3`. This is an authentication-core change to a system holding student PII and needs its own validated pass — Phase 8 Gate 1. |
+| **PB-1** | `@auth/core@0.37.4` — CRITICAL (GHSA-7rqj-j65f-68wh, homoglyph email bypass), HIGH (GHSA-xmf8-cvqr-rfgj), MODERATE. | **CLOSED** | Upgraded to `@convex-dev/auth@0.0.95` with `@auth/core@0.41.3` pinned, commit `d58f971`. Reachability proven against the installed tree: `@convex-dev/auth` imports only `setEnvDefaults` from `@auth/core`, the registered Email provider has zero `@auth/core` references, and `getToken` is reachable only from the unused `nextjs` entrypoint. Authentication re-validated through real sign-in — 42/42 both before and after — and the authorization matrix holds at 113/113. See `PRODUCTION_SECURITY_REVIEW.md` §4.2.1. |
 | **PB-2** | `staff:get` authorization defect — parent and student could read individual staff records. | **CLOSED** | Remediated in `d9ba8b7`. Verified: regression suite 38/0, extended matrix 113/0/0. Evidence: `PRODUCTION_SECURITY_REVIEW.md` §4.1.1. |
 | **PB-3** | `react-router@7.18.1` RSC CSRF (GHSA-qwww-vcr4-c8h2). Assessed **not reachable**: declarative SPA mode across 29 import sites, no RSC, no SSR, no server actions. | **OPEN** | Raise to `>=7.18.2`. The running frontend is a baked image `schoolcore-frontend:oauth-pages` whose build definition is **not in the repository** — that prerequisite must be located or reconstructed first. Phase 8 Gate 2. |
 
@@ -189,6 +189,7 @@ Stated so nobody re-derives them:
 - **`main` is not blindly merged** into the production branch.
 - **Freebuff/Convex Cloud is not "live production".** It is a paused archive.
 - **A green CI run does not mean deployed.** Only `d9ba8b7` is running.
-- **PB-1 and PB-3 are not dismissed.** Both are assessed not-reachable and both
-  remain open blockers.
+- **PB-1 is closed, not dismissed.** Its reachability was proven against the
+  installed tree and the vulnerable version removed anyway. **PB-3 remains an
+  open blocker** and is assessed not-reachable but not remediated.
 - **The swap warning is not an incident.**
