@@ -1,15 +1,29 @@
 # Migration Status — Live Checklist
 
-> **Status:** **PHASE 6B AUTH GATE CLOSED** - the Freebuff to self-host
-> migration is proven end-to-end against a real PROD snapshot, including an
-> **existing production password**. Remaining cutover blockers are
-> operational and security items, not migration compatibility.
-> Convex Cloud / Freebuff production remains **live and untouched** - no
-> permanent data migration, no cutover.
+> **Status: MIGRATION COMPLETE (2026-09-29).** The Freebuff to self-host
+> migration was executed and accepted. See
+> **"Phase 6B/7 - PRODUCTION CUTOVER COMPLETED (2026-09-29)"** further down this
+> same file, which is the authoritative record.
 >
-> **Rules in force:** no data migration yet · no production modification · no
-> Convex Cloud changes · no secret values in the repo · no destructive
-> actions · no git-history purges.
+> **Current state is not in this file.** For the deployed SHA, open pilot
+> blockers and known risks read
+> [`SCHOOLCORE_CURRENT_STATE.md`](./SCHOOLCORE_CURRENT_STATE.md). For remaining
+> work read [`PHASE8_ROADMAP.md`](./PHASE8_ROADMAP.md).
+>
+> **What follows this correction is historical record and is preserved as
+> written.** The block below described the pre-cutover position and is retained
+> because it is the evidence of what was decided and when:
+>
+> > **Status at the time (pre-cutover):** **PHASE 6B AUTH GATE CLOSED** - the
+> > Freebuff to self-host migration is proven end-to-end against a real PROD
+> > snapshot, including an **existing production password**. Remaining cutover
+> > blockers are operational and security items, not migration compatibility.
+> > Convex Cloud / Freebuff production remains **live and untouched** - no
+> > permanent data migration, no cutover.
+> >
+> > **Rules in force at the time:** no data migration yet · no production
+> > modification · no Convex Cloud changes · no secret values in the repo · no
+> > destructive actions · no git-history purges.
 >
 > Confirmed decisions and the host-specific execution runbook live in
 > [`SELF_HOST_EXECUTION_CHECKLIST.md`](./SELF_HOST_EXECUTION_CHECKLIST.md)
@@ -33,16 +47,28 @@
 
 ### Progress snapshot
 
-| Phase | Name | Status |
-| --- | --- | --- |
-| 0 | Preparation (docs, plans, audits) | ✅ **DONE** |
-| 1 | Repository security items below | ☐ Not started (dotenvx key confirmed orphaned) |
-| 2 | Infrastructure (gman-02, Docker, firewall, tunnel) | ✅ **DONE** |
-| 3 | Self-hosted Convex (empty backend + PostgreSQL 17) | ✅ **DONE** |
-| 4 | Data migration | REHEARSED against a real Freebuff PROD snapshot - final import pending cutover |
-| 5 | Application verification | ✅ **DONE** (Phase 5A code + Phase 5B deployment) |
-| 6 | Email migration (Resend) | PARTIAL - EMAIL DELIVERY NOT PRODUCTION READY |
-| 7 | Cutover | BLOCKED - write-freeze + owner security actions |
+> **Corrected 2026-09-30.** Phases 4, 6 and 7 below are marked as they were
+> *before* cutover and are contradicted by the
+> "Phase 6B/7 - PRODUCTION CUTOVER COMPLETED" section later in this file. The
+> **Corrected as at cutover** column records the actual outcome. The original
+> Status column is preserved as written. Current state beyond cutover is in
+> [`SCHOOLCORE_CURRENT_STATE.md`](./SCHOOLCORE_CURRENT_STATE.md).
+
+| Phase | Name | Status (as originally written) | Corrected as at cutover |
+| --- | --- | --- | --- |
+| 0 | Preparation (docs, plans, audits) | ✅ **DONE** | ✅ DONE |
+| 1 | Repository security items below | ☐ Not started (dotenvx key confirmed orphaned) | ✅ DONE — see below |
+| 2 | Infrastructure (gman-02, Docker, firewall, tunnel) | ✅ **DONE** | ✅ DONE |
+| 3 | Self-hosted Convex (empty backend + PostgreSQL 17) | ✅ **DONE** | ✅ DONE |
+| 4 | Data migration | REHEARSED against a real Freebuff PROD snapshot - final import pending cutover | ✅ **DONE** — 666 documents imported 2026-09-29 |
+| 5 | Application verification | ✅ **DONE** (Phase 5A code + Phase 5B deployment) | ✅ DONE |
+| 6 | Email migration (Resend) | PARTIAL - EMAIL DELIVERY NOT PRODUCTION READY | ✅ **DONE** — Resend delivery verified in production |
+| 7 | Cutover | BLOCKED - write-freeze + owner security actions | ✅ **DONE** — cutover completed, owner accepted |
+
+The §2–§7 checkbox items below are a **pre-cutover snapshot frozen at
+2026-09-26**. Many remain unchecked because they were completed after the
+freeze and were never back-filled. They are preserved as written for audit.
+Where they conflict with the outcome above, the outcome is correct.
 
 ---
 
@@ -408,10 +434,22 @@ against the live container while the SchoolCore stack keeps serving.
 | 2026-09-27 | **Phase 4 complete** — empty self-hosted Convex on gman-02: PostgreSQL 17.11, Cloudflare Tunnel connected, API + site hostnames live, dashboard private/unrouted, restore test passed. |
 | 2026-09-27 | **Phase 5A** — branch `phase5-selfhost-readiness` off `d4cc5b4`. Opt-in Freebuff provider, Resend email adapter, frontend container + nginx config, `.env.example` corrected. Dashboard Access deferred by Owner decision (billing); dashboard stays unrouted. |
 | 2026-09-27 | **Phase 5B DEPLOYED** — commit `df14e98` deployed to gman-02. Convex functions/schema deployed to the self-hosted backend (PostgreSQL, no SQLite). Convex Auth configured with self-generated RS256 keys. `schoolcore-frontend` built and serving; `schoolcore.ooflowdesk.com` returns HTTP 200. Password auth verified end-to-end with controlled synthetic test data. Post-deployment backup created. **No production data migrated; Convex Cloud untouched.** |
+| 2026-09-28 | Phase 6B authorization fix applied — `/activate` route added, `VLY_INTEGRATION_KEY` / `SEED_SECRET` removed from the self-host deployment, `SECURITY.md` updated with the no-auto-provisioning guarantee. |
+| 2026-09-29 | **Phase 6B/7 PRODUCTION CUTOVER COMPLETED** — 666 documents migrated with every verification PASS (counts, IDs, creation times, relationships, tenant isolation, existing-credential authentication, owner browser acceptance). See the cutover section above. |
+| 2026-09-29 | **Phase 8 opened.** Authorization validation found two pilot-blocking defects; both subsequently fixed — student horizontal access (`db1fe52`) and PB-2 `staff:get` (`d9ba8b7`). |
+| 2026-09-30 | **Monitoring corrective pass** — three critical defects found and fixed in the monitoring and alerting implementation, including an alerting path that had never been able to send a DEGRADED or CRITICAL alert. |
+| 2026-09-30 | **Documentation reconciliation** — banner and Progress snapshot corrected; historical record preserved as written; authoritative current state moved to `SCHOOLCORE_CURRENT_STATE.md` and `PHASE8_ROADMAP.md`. No application, dependency, infrastructure or deployment change. |
 
 ---
 
 ## Standing reminder
+
+> **Superseded 2026-09-30.** The reminder below applied **before** cutover and
+> is preserved as written. Cutover completed on 2026-09-29, so the "until cutover
+> completes and the grace period ends" condition has been reached.
+> Freebuff/Convex Cloud is now a **PAUSED ARCHIVE / ROLLBACK REFERENCE** — not
+> resumed, not deleted, and not to be resumed casually. The "no gate may be
+> skipped" rule still applies to Phase 8; see `PHASE8_ROADMAP.md`.
 
 No item above may be executed ahead of its phase gate, and **no gate may be
 skipped**: preparation → infrastructure → self-hosted Convex → data
