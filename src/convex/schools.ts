@@ -186,6 +186,66 @@ export const createSchool = mutation({
   },
 });
 
+/**
+ * Containment for a tenant that cannot be administered from inside itself.
+ *
+ * team:setActive is tenant-scoped, so a school whose only administrators are
+ * locked out has no way to disable its own accounts. This reuses the SAME
+ * permission that already provisions the administrator (platform.schools.manage)
+ * and is constrained to a caller-named school, so it grants no broader platform
+ * access than account provisioning already does.
+ *
+ * It will only disable a user that actually holds a membership in the named
+ * school, and refuses platform administrators outright.
+ */
+export const disableSchoolUser = action({
+  args: { schoolId: v.id("schools"), email: v.string() },
+  handler: async (ctx, { schoolId, email }) => {
+    await ctx.runQuery(internal.accounts.sessionInfo, {
+      permission: "platform.schools.manage",
+    });
+    const normalized = email.trim().toLowerCase();
+
+    const user = await ctx.runQuery(internal.accounts.findUserByEmailInternal, {
+      email: normalized,
+    });
+    if (!user) throw new ConvexError("No user record exists for that address.");
+
+    const memberships = await ctx.runQuery(
+      internal.accounts.membershipsForUserInternal,
+      { userId: user.userId },
+    );
+    const inSchool = memberships.find((m) => m.schoolId === schoolId);
+    if (!inSchool) {
+      throw new ConvexError("That user is not a member of the named school.");
+    }
+    if (inSchool.role === "super_admin") {
+      throw new ConvexError("Platform administrators cannot be disabled from a school.");
+    }
+
+    // Deactivate the school as well, so the tenant is not merely unusable but
+    // explicitly parked. `inactive` is recorded state, not authn enforcement.
+    const school = await ctx.runQuery(internal.accounts.schoolByIdInternal, {
+      schoolId,
+    });
+    if (school && school.status === "active") {
+      await ctx.runMutation(internal.accounts.setSchoolStatusInternal, {
+        schoolId,
+        status: "inactive",
+      });
+    }
+
+    await ctx.runMutation(internal.accounts.setUserActiveInternal, {
+      userId: user.userId,
+      isActive: false,
+    });
+    // Kill any live sessions so containment is immediate, not next sign-in.
+    await ctx.runMutation(internal.accounts.deleteSessionsInternal, { userId: user.userId });
+
+    return { email: normalized, disabled: true };
+  },
+});
+
 /** After createSchool, provision the admin's password credentials (action ctx). */
 export const provisionAdminAccount = action({
   args: { email: v.string(), password: v.string() },
@@ -204,10 +264,32 @@ export const provisionAdminAccount = action({
       email: normalized,
     });
     if (!hasAccount) {
+      // Adopt the user that createSchool already created and bound the school
+      // membership to. Without an explicit userId, createAccount creates a
+      // SECOND user document and attaches the credential to it, leaving the
+      // membership orphaned on the first — the administrator then signs in as a
+      // user with no school and getSession refuses them. team:createUser states
+      // this rule explicitly; this path must follow it.
+      const existing = await ctx.runQuery(internal.accounts.findUserByEmailInternal, {
+        email: normalized,
+      });
+      if (!existing) {
+        throw new ConvexError(
+          "No user record exists for this address. Provisioning must follow school creation.",
+        );
+      }
       await createAccount(ctx, {
         provider: "password",
         account: { id: normalized, secret: password },
         profile: { email: normalized },
+        // Adopt the user createSchool already created (and to which the school
+        // membership is bound) instead of minting a second identity. Without
+        // this, Convex Auth creates a new user document, attaches the
+        // credential to it, and the membership is orphaned: the administrator
+        // signs in as a user with no school and getSession refuses them.
+        // This is the same rule team:createUser follows by binding the
+        // membership to account.user._id after the fact.
+        shouldLinkViaEmail: true,
       });
     }
     return null;

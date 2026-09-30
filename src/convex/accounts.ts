@@ -286,6 +286,38 @@ export const setUserActiveInternal = internalMutation({
   },
 });
 
+/** Memberships for a user — used by platform-scoped containment. */
+export const membershipsForUserInternal = internalQuery({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }) => {
+    return await ctx.db
+      .query("schoolMemberships")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect();
+  },
+});
+
+/** Read a school's current status — used by platform-scoped containment. */
+export const schoolByIdInternal = internalQuery({
+  args: { schoolId: v.id("schools") },
+  handler: async (ctx, { schoolId }) => {
+    const school = await ctx.db.get(schoolId);
+    if (!school) return null;
+    return { _id: school._id, status: school.status, name: school.name, code: school.code };
+  },
+});
+
+/** Park a school (active <-> inactive) without a school-scoped session. */
+export const setSchoolStatusInternal = internalMutation({
+  args: { schoolId: v.id("schools"), status: v.union(v.literal("active"), v.literal("inactive")) },
+  handler: async (ctx, { schoolId, status }) => {
+    const school = await ctx.db.get(schoolId);
+    if (school && school.status !== status) {
+      await ctx.db.patch(schoolId, { status });
+    }
+  },
+});
+
 /* ------------------------------------------------------------------ */
 /* Queries used by the frontend                                        */
 /* ------------------------------------------------------------------ */
