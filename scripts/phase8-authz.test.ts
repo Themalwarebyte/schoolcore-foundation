@@ -229,12 +229,19 @@ describe("school admin — staff records", () => {
   });
 });
 
-describe("teacher — staff records (holds staff.view)", () => {
-  test("reads a staff record in its own school", () => {
-    expect(run("staff:get", { staffId: IDS.gfStaff }, IDS.teacher)).toBe("ALLOWED");
+describe("teacher — staff records", () => {
+  // The teacher role does NOT hold staff.view. ROLE_PERMISSIONS grants it to
+  // school_admin, principal and accountant only. Before the fix a teacher could
+  // read an individual staff record purely because staff:get had no role gate;
+  // it was already refused by staff:list and hidden behind a nav item gated on
+  // staff.view. Requiring the permission therefore closes the direct-URL route
+  // rather than withdrawing access a teacher was ever meant to have.
+  test("is denied a staff record in its own school (holds no staff.view)", () => {
+    expect(run("staff:get", { staffId: IDS.gfStaff }, IDS.teacher)).toBe("DENIED");
   });
-  test("is denied a staff record in another school", () => {
-    expect(run("staff:get", { staffId: IDS.rvStaff }, IDS.teacher)).toBe("DENIED");
+  test("is denied the staff roster and stats (unchanged)", () => {
+    expect(run("staff:list", PAG, IDS.teacher)).toBe("DENIED");
+    expect(run("staff:stats", {}, IDS.teacher)).toBe("DENIED");
   });
 });
 
