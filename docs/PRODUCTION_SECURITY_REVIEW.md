@@ -199,7 +199,7 @@ access is refused, so this is intra-tenant exposure of staff contact and
 employment metadata — not the child-level personal data of §3.1. It is recorded
 as a defect to fix, not as an accepted risk.
 
-**Separate fix plan (not executed):**
+**Separate fix plan (executed 2026-09-30 — see §4.1.1, PB-2 CLOSED):**
 
 1. Replace bare `getSession` in `staff:get` with
    `requirePermission(ctx, "staff.view")`, matching `staff:list`.
@@ -386,9 +386,9 @@ actually reach the system.
 
 | # | Blocker | Severity | Required before pilot |
 |---|---|---|---|
-| PB-1 | `@auth/core@0.37.4` CRITICAL + HIGH advisories (4.2) | CRITICAL (not reachable in current configuration) | Upgrade `@convex-dev/auth` to `0.0.95` and realign `@auth/core` to `>=0.41.3`; validate with a full authentication smoke pass |
-| PB-2 | `staff:get` authorization defect (4.1) | AUTHORIZATION DEFECT (moderate exposure) | Execute the fix plan in §4.1 with regression tests, and re-run the full authorization matrix |
-| PB-3 | `react-router@7.18.1` RSC CSRF (4.3) | HIGH (not reachable) | Raise to `>=7.18.2` in the next change that rebuilds and deploys the frontend image |
+| PB-1 | `@auth/core@0.37.4` CRITICAL + HIGH advisories (4.2) | CRITICAL (not reachable in current configuration) | **OPEN** — upgrade `@convex-dev/auth` to `0.0.95` and realign `@auth/core` to `>=0.41.3`; validate with a full authentication smoke pass |
+| PB-2 | `staff:get` authorization defect (4.1) | AUTHORIZATION DEFECT (moderate exposure) | **CLOSED** — remediated in `d9ba8b7`, see §4.1.1 |
+| PB-3 | `react-router@7.18.1` RSC CSRF (4.3) | HIGH (not reachable) | **OPEN** — raise to `>=7.18.2` in the next change that rebuilds and deploys the frontend image |
 
 Two further items are open but are **not** pilot blockers:
 
@@ -430,6 +430,78 @@ Two further items are open but are **not** pilot blockers:
 
 ---
 
+## 4.1.1 PB-2 remediation — `staff:get` closed
+
+Remediated 2026-09-30. Deployed commit **`d9ba8b7330bc69cc34408f799f285cb13b57bde7`**,
+branch `selfhost-production`, CI run #10 success.
+
+**Root cause.** `staff:get` was the only staff read handler with no role gate:
+
+| Handler | Gate |
+|---|---|
+| `staff:list` | `requirePermission(ctx, "staff.view")` |
+| **`staff:get`** | **`getSession(ctx)` + tenant check** |
+| `staff:stats` | `requirePermission(ctx, "staff.view")` |
+| `staff:departments` | `requirePermission(ctx, "staff.view")` |
+| `staff:create` / `update` / `archive` | `requirePermission` on `staff.create` / `update` / `archive` |
+
+`getSession` proves only that the caller is signed in with an active school
+membership. Any such account — including `parent` and `student`, neither of
+which holds `staff.view` — could therefore read an individual staff record.
+
+**Change.** One line, using the same helper and permission as its neighbours:
+
+```diff
+-    const session = await getSession(ctx);
++    const session = await requirePermission(ctx, "staff.view");
+```
+
+The tenant boundary on the following line is untouched. `getSession` was removed
+from the import because the file had no other use of it. No other permission,
+module, role or frontend file was changed.
+
+**Super-admin decision — secure denial preserved.** `requirePermission` passes
+for `super_admin` because `can()` is unconditional, and the existing tenant
+check then refuses the record, since a platform session carries a null
+`schoolId`. Behaviour is therefore unchanged: DENIED before, DENIED after.
+This matches the established convention — school-scoped reads gate on
+`requirePermission` and scope by `session.schoolId`, while cross-school platform
+reach is provided by separately-named platform endpoints (`platform:*`,
+`schools:listSchools`, `phase7/access:accessOverview`). Adding
+`session.isPlatform` here would have invented a global-access model this
+handler never had.
+
+**Behaviour change worth recording: teachers lose direct-URL `staff:get`.** The
+teacher role does **not** hold `staff.view` — `ROLE_PERMISSIONS` grants it to
+`school_admin`, `principal` and `accountant` only. Before the fix a teacher could
+read a staff record *only* because there was no gate; they were already refused
+by `staff:list` and `staff:stats`, and the Staff & Teachers nav item is gated on
+`permission: "staff.view"` (`school-layout.tsx:53`), so a teacher never saw that
+section. Requiring the permission closes the direct-URL route `/staff/:staffId`
+rather than withdrawing access a teacher was ever meant to have. This surfaced
+as one failing suite case on the first post-fix run; the expectation was
+verified against `ROLE_PERMISSIONS` and corrected, not the code.
+
+**Validation.**
+
+| Stage | Result |
+|---|---|
+| Before-state, live deployment | parent `ALLOWED`, student `ALLOWED` — both expected `DENIED` |
+| Before-state, same repository | parent and student already `DENIED` on `staff:list` and `staff:stats` |
+| Regression suite, UNFIXED | **36 pass / 2 fail** — the 2 failures exactly the parent and student cases |
+| Regression suite, POST-FIX | **38 pass / 0 fail** |
+| Extended authorization matrix, POST-FIX | **113 pass / 0 fail / 0 retest** (101 original + 12 staff rows) |
+| Deployed commit | `d9ba8b7`, clean tree, no index deletions, no generated-file drift |
+| Dependency drift | none — `package.json`, `bun.lock`, `src/convex/_generated` untouched |
+
+**Residual observation, not fixed.** Platform super admin still receives an
+empty page from `staff:list` (its null `schoolId` makes the school index query
+match nothing) while being refused `staff:get`. Both are consequences of the
+same null `schoolId`, not a deliberate design. Recorded rather than resolved,
+because changing it would mean inventing a cross-school access model.
+
+---
+
 ## 8. Security review status
 
 | Area | Status |
@@ -438,12 +510,13 @@ Two further items are open but are **not** pilot blockers:
 | Student horizontal access defect | **FIXED** — `db1fe52` |
 | Production alerting path | **FIXED** — two defects, verified end to end |
 | Production-reachable dependency findings | **FIXED** — Hono 4.12.27 → 4.13.11 |
-| `staff:get` assessment | **COMPLETE** — defect identified, fix plan written, not executed |
+| `staff:get` defect | **FIXED** — `d9ba8b7`, PB-2 closed |
+| Off-site backup freshness signal | **FIXED** — `production-health.sh` read the oldest snapshot (`MONITORING_AND_ALERTING.md` §7.4) |
 | Dependency audit | **COMPLETE** — 18 open, all triaged with disposition |
 | Docker healthcheck review | **COMPLETE** — no change, external monitoring authoritative |
 | SSH hardening review | **COMPLETE** — no change, accepted risk |
 
-**8.6 security review: COMPLETE**, with three pilot blockers recorded and
-owned (PB-1, PB-2, PB-3) rather than closed.
+**8.6 security review: COMPLETE**. Of the three pilot blockers, **PB-2 is
+closed**; PB-1 and PB-3 remain open and owned.
 
 Phase 8 remains **open**. This document does not claim Phase 8 complete.
