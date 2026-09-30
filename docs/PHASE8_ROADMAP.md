@@ -219,23 +219,41 @@ documented as such: the Restic password with the rclone OAuth config, and
 
 ---
 
-### Gate 4 — Database Review
+### Gate 4 — Database Review — **COMPLETE**
 
 **8.7**
 
-**Objective.** Review the data model and query patterns now that the system is
-live and its real usage is known.
+Audited the production database read-only. **No changes were made, because the
+evidence did not support any.**
 
-**Prerequisites.** Gate 3 complete.
+| Acceptance criterion | Result |
+|---|---|
+| Baseline recorded | PostgreSQL 17.11, 21 MB, 6,916 live document rows, 3,924 current entities, 1 connection in use |
+| Schema reviewed | 105 tables, 271 Convex index definitions, 0 tables unindexed, 0 duplicates |
+| Query patterns reviewed | 838 unbounded `.collect()` sites assessed; all either school-scoped or on small dimension tables; no missing pagination on a growing surface |
+| Index usage assessed | `documents` 99.6% index-served (145,432 idx_scan vs 543 seq_scan); no bloat; autovacuum healthy |
+| Required optimizations | **none** |
+| Safe changes applied | none justified — a twelve-table schema declaration (hygiene) would require a deployment-wide migration for no measured benefit |
+| No unsupported optimizations introduced | yes — no index added speculatively |
+| Documentation updated | `docs/DATABASE_REVIEW.md` |
+| Production stability confirmed | read-only pass; deployed SHA `8f4b84f` unchanged, all services healthy |
 
-**Acceptance criteria.**
-- Table and index review against actual query patterns.
-- Index recommendations identified, each with the query it serves and its cost.
-- Any change proposed with before/after evidence rather than assertion.
-- Findings recorded whether or not they are acted on.
+**Key architectural finding:** PostgreSQL holds Convex's storage engine, not the
+application data model. The application never queries those tables, and the eight
+physical B-trees are Convex's own. The application's query index is the schema's
+Convex index definitions, so the audit was against those and **no PostgreSQL DDL
+is appropriate**.
 
-**Do not.** Fold index changes into an unrelated gate. Index changes are
-schema changes and need their own backup and review.
+**Two items carried forward, neither a pilot blocker:**
+- **R1 (hygiene).** Twelve tables are queried with `withIndex()` but are absent
+  from `schema.ts`. Verified working on the live deployment — Convex resolves
+  their indexes implicitly. The cost is that those documents are unvalidated and
+  their indexes are invisible to a future schema regeneration. Schedule with the
+  next schema-change window.
+- **R2 (measurement).** `attendanceRecords` is the only compounding table
+  (105 rows for 86 students) and the primary load area for 8.8.
+
+Evidence: `docs/DATABASE_REVIEW.md`.
 
 ---
 

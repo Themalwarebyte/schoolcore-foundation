@@ -137,6 +137,7 @@ why this record was created.
 | Platform super-admin school context | `staff:list` returns an empty page for a platform admin while `staff:get` returns DENIED. Both stem from the null `schoolId`; neither is deliberate design. Recorded, not resolved, because resolving it means defining a cross-school access model. |
 | **Backup omits the Convex storage volume** | **RESOLVED 2026-09-30.** `backup.sh` now captures `convex-data:/storage` (13 module blobs, 10 MB) alongside the dump, inside the same SHA256 manifest and the same restic encryption, excluding the `credentials/` secret. Proven by a second rehearsal restoring from the new backup alone: 0 missing-storage errors, authentication 42/42, authorization 8/8, all entity counts matching live, 7s to serving. See `BACKUP_AND_RESTORE.md` §9.1. |
 | **Recovered backend must use the production site origin** | The restored env store carries the production `CONVEX_SITE_URL`, and `auth.config.ts` builds its OIDC provider from it. Start a recovered backend on a different origin and every session resolution fails with `NoAuthProvider`. Free on a real recovery, but a sharp edge in rehearsals and indistinguishable from a broken restore. Documented in `BACKUP_AND_RESTORE.md` §9.3. |
+| **Twelve tables are queried but not declared in the schema** | `mealPlans`, `mealEnrollments`, `mealConsumption`, `schoolRequests`, `applications`, `allocationSettings`, `promotionRuns`, `paymentAllocations`, `bankImportBatches`, `bankImportRows`, `feeVoteheads`, `feeItemVoteheads`. Verified working — Convex resolves their indexes implicitly and all are empty. The cost is that those documents are unvalidated and their indexes are invisible to a future schema regeneration. Hygiene, not a pilot blocker. See `DATABASE_REVIEW.md` §4.1. |
 
 ---
 
@@ -192,6 +193,6 @@ Stated so nobody re-derives them:
 - **Freebuff/Convex Cloud is not "live production".** It is a paused archive.
 - **A green CI run does not mean deployed.** Only `d9ba8b7` is running.
 - **All three pilot blockers are closed** (PB-1, PB-2, PB-3). That is a
-  precondition for Gate 10, not the same thing as pilot readiness — Gates 3–9
+  precondition for Gate 10, not the same thing as pilot readiness — Gates 5–9
   have not started.
 - **The swap warning is not an incident.**
