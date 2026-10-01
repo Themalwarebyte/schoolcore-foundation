@@ -278,18 +278,22 @@ export const provisionAdminAccount = action({
           "No user record exists for this address. Provisioning must follow school creation.",
         );
       }
-      await createAccount(ctx, {
+      // Convex Auth will NOT adopt `existing`: it only reuses a pre-existing
+      // user whose email is verified, and the row createSchool wrote has no
+      // emailVerificationTime. So the account gets its own row and we bind the
+      // membership to it explicitly — the same binding team:createUser
+      // performs by reading back account.user._id.
+      const account = await createAccount(ctx, {
         provider: "password",
         account: { id: normalized, secret: password },
         profile: { email: normalized },
-        // Adopt the user createSchool already created (and to which the school
-        // membership is bound) instead of minting a second identity. Without
-        // this, Convex Auth creates a new user document, attaches the
-        // credential to it, and the membership is orphaned: the administrator
-        // signs in as a user with no school and getSession refuses them.
-        // This is the same rule team:createUser follows by binding the
-        // membership to account.user._id after the fact.
         shouldLinkViaEmail: true,
+      });
+      const accountUserId = (account.user as { _id: Id<"users"> })._id;
+      await ctx.runMutation(internal.accounts.adoptUserMembershipsInternal, {
+        fromUserId: existing.userId,
+        toUserId: accountUserId,
+        email: normalized,
       });
     }
     return null;

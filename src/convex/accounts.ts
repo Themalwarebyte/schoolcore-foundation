@@ -318,6 +318,60 @@ export const setSchoolStatusInternal = internalMutation({
   },
 });
 
+/**
+ * Move every membership from one user row to another, and park the old row.
+ *
+ * Convex Auth only adopts a pre-existing user when its email is VERIFIED
+ * (see uniqueUserWithVerifiedEmail, which filters on emailVerificationTime).
+ * The row that createSchool writes is not verified, so createAccount cannot
+ * adopt it and a second identity is created instead. This performs the
+ * binding explicitly — the same thing team:createUser does by reading back
+ * account.user._id — so the credential and the membership end up on one row.
+ */
+export const adoptUserMembershipsInternal = internalMutation({
+  args: {
+    fromUserId: v.id("users"),
+    toUserId: v.id("users"),
+    email: v.string(),
+  },
+  handler: async (ctx, { fromUserId, toUserId, email }) => {
+    if (fromUserId === toUserId) return { moved: 0 };
+
+    const old = await ctx.db.get(fromUserId);
+    // Carry the identity fields onto the row the credential now points at.
+    if (old) {
+      await ctx.db.patch(toUserId, {
+        email,
+        name: old.name ?? undefined,
+        isActive: old.isActive !== false,
+      });
+    }
+
+    const memberships = await ctx.db
+      .query("schoolMemberships")
+      .withIndex("by_user", (q) => q.eq("userId", fromUserId))
+      .collect();
+
+    let moved = 0;
+    for (const m of memberships) {
+      const dupe = await ctx.db
+        .query("schoolMemberships")
+        .withIndex("by_user_school", (q) => q.eq("userId", toUserId).eq("schoolId", m.schoolId))
+        .unique();
+      if (dupe) {
+        await ctx.db.delete(m._id);
+      } else {
+        await ctx.db.patch(m._id, { userId: toUserId });
+      }
+      moved++;
+    }
+
+    // The orphan row must not stay usable.
+    await ctx.db.patch(fromUserId, { isActive: false });
+    return { moved };
+  },
+});
+
 /* ------------------------------------------------------------------ */
 /* Queries used by the frontend                                        */
 /* ------------------------------------------------------------------ */
