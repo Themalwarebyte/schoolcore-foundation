@@ -650,6 +650,73 @@ export const receiptDetail = query({
 });
 
 /* ================================================================== */
+/* Boarding visibility — school-scoped, parent-child / student-self      */
+/* ================================================================== */
+
+/**
+ * Return only a pupil's current dormitory assignment. All reads are
+ * restricted to the signed-in student's school; callers cannot supply a
+ * schoolId or impersonate another pupil. Historical/ended allocations are
+ * intentionally excluded from the portal response.
+ */
+async function currentBoardingForStudent(
+  ctx: QueryCtx,
+  schoolId: Id<"schools">,
+  student: Doc<"students">,
+) {
+  const records = await ctx.db
+    .query("boardingAllocations")
+    .withIndex("by_student", (q) => q.eq("studentId", student._id))
+    .collect();
+  const active = records.find((a) => a.schoolId === schoolId && a.status === "active");
+  if (!active) {
+    return {
+      status: student.boardingStatus === "boarding" ? "not_assigned" as const : "day" as const,
+      hostel: null, room: null, bed: null,
+    };
+  }
+  const [hostel, room, bed] = await Promise.all([
+    ctx.db.get(active.hostelId),
+    ctx.db.get(active.roomId),
+    ctx.db.get(active.bedId),
+  ]);
+  // Fail closed if old or inconsistent references point outside the tenant.
+  if (!hostel || !room || !bed ||
+      hostel.schoolId !== schoolId || room.schoolId !== schoolId || bed.schoolId !== schoolId ||
+      room.hostelId !== hostel._id || bed.roomId !== room._id) {
+    return { status: "not_assigned" as const, hostel: null, room: null, bed: null };
+  }
+  return {
+    status: "assigned" as const,
+    hostel: hostel.name,
+    room: room.roomNumber,
+    bed: bed.bedNumber,
+  };
+}
+
+/** A parent may view dormitory details only for a linked, active child. */
+export const parentChildBoarding = query({
+  args: { studentId: v.id("students") },
+  handler: async (ctx, { studentId }) => {
+    const session = await requirePermission(ctx, "portal.parent");
+    const schoolId = session.schoolId as Id<"schools">;
+    const student = await authorizeChild(ctx, schoolId, session.userId, studentId);
+    return currentBoardingForStudent(ctx, schoolId, student);
+  },
+});
+
+/** A student can only view their own dormitory assignment. */
+export const studentBoarding = query({
+  args: {},
+  handler: async (ctx) => {
+    const session = await requirePermission(ctx, "portal.student");
+    const schoolId = session.schoolId as Id<"schools">;
+    const student = await studentIdentity(ctx, schoolId, session.userId);
+    return currentBoardingForStudent(ctx, schoolId, student);
+  },
+});
+
+/* ================================================================== */
 /* Student portal                                                       */
 /* ================================================================== */
 

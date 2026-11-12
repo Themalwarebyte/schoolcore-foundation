@@ -7,6 +7,7 @@ import { PortalPageHeader, PortalSkeleton } from "@/components/layouts/portal-la
 import { AttendanceView, ResultsView, ReportCardsView } from "./shared";
 import { formatDateTime } from "@/lib/status";
 import { CalendarCheck, Award, ClipboardList, Megaphone, ArrowRight, GraduationCap } from "lucide-react";
+import { BoardingStatusCard } from "./BoardingStatusCard";
 
 /* ------------------------------------------------------------------ */
 /* Student dashboard                                                   */
@@ -15,6 +16,7 @@ import { CalendarCheck, Award, ClipboardList, Megaphone, ArrowRight, GraduationC
 export default function StudentDashboard() {
   const overview = useQuery(api.portal.studentOverview, {});
   const announcements = useQuery(api.portal.listAnnouncements, {});
+  const boarding = useQuery(api.portal.studentBoarding, {});
 
   if (overview === undefined) {
     return (
@@ -45,6 +47,8 @@ export default function StudentDashboard() {
           </div>
         </CardContent>
       </Card>
+
+      <BoardingStatusCard boarding={boarding} />
 
       {/* Stats */}
       <div className="mt-4 grid grid-cols-2 gap-3">

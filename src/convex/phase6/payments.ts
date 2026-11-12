@@ -16,6 +16,8 @@ import { ConvexError, v } from "convex/values";
 import { internalMutation, mutation, query } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
 import { requirePermission, getSession, getSchoolRecord } from "../session";
+import { parentIdentity, studentIdentity } from "../portal";
+import { can } from "../access";
 import { recordAudit } from "../audit";
 import { postSystemPayment } from "../finance";
 import { PAYMENT_REQUEST_STATUSES, maskPhone } from "./constants";
@@ -50,17 +52,21 @@ export const initiatePayment = mutation({
 
     // Parents may pay only for their own linked children (portal-scoped).
     if (session.role.role === "parent") {
+      // Apply the same active-link and active-guardian checks as the portal.
+      const guardian = await parentIdentity(ctx, schoolId, session.userId);
       const link = await ctx.db
-        .query("guardianPortalLinks")
-        .withIndex("by_user", (q) => q.eq("userId", session.userId))
-        .first();
-      if (!link) throw new ConvexError("No portal profile.");
-      const children = await ctx.db
         .query("guardianStudents")
-        .withIndex("by_guardian", (q) => q.eq("guardianId", link.guardianId))
-        .collect();
-      if (!children.some((c) => c.studentId === studentId)) {
-        throw new ConvexError("You can only pay for your own children.");
+        .withIndex("by_guardian_student", (q) => q.eq("guardianId", guardian._id).eq("studentId", studentId))
+        .first();
+      if (!link) throw new ConvexError("You can only pay for your own children.");
+    } else if (!can(session.role, "payments.create")) {
+      // Teachers and students cannot trigger M-Pesa requests for arbitrary pupils.
+      throw new ConvexError("You do not have permission to initiate payments.");
+    }
+    if (invoiceId) {
+      const invoice = await getSchoolRecord(ctx, schoolId, "invoices", invoiceId);
+      if (invoice.studentId !== studentId || invoice.status === "cancelled" || invoice.status === "draft") {
+        throw new ConvexError("Invoice is not payable for this student.");
       }
     }
 
@@ -270,8 +276,23 @@ export const myPaymentRequests = query({
   args: { studentId: v.optional(v.id("students")) },
   handler: async (ctx, { studentId }) => {
     const session = await getSession(ctx);
-    const schoolId = session.schoolId as Id<"schools">;
+    if (!session.schoolId) throw new ConvexError("Select a school to continue.");
+    const schoolId = session.schoolId;
     if (!studentId) return [];
+    await getSchoolRecord(ctx, schoolId, "students", studentId);
+    if (session.role.role === "parent") {
+      const guardian = await parentIdentity(ctx, schoolId, session.userId);
+      const link = await ctx.db
+        .query("guardianStudents")
+        .withIndex("by_guardian_student", (q) => q.eq("guardianId", guardian._id).eq("studentId", studentId))
+        .first();
+      if (!link) throw new ConvexError("This student is not linked to your account.");
+    } else if (session.role.role === "student") {
+      const own = await studentIdentity(ctx, schoolId, session.userId);
+      if (own._id !== studentId) throw new ConvexError("You can only view your own payment requests.");
+    } else if (!can(session.role, "payments_external.view")) {
+      throw new ConvexError("You do not have permission to view external payments.");
+    }
     const rows = await ctx.db
       .query("paymentRequests")
       .withIndex("by_student", (q) => q.eq("studentId", studentId))
