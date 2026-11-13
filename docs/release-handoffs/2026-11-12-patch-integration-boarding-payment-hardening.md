@@ -151,3 +151,17 @@ Isolated environment unavailable; **no silent substitution of code review for ru
 **Rationale:** CI is green (1/1 pass) and static validation is acceptable, but required runtime release gates are unmet: no isolated runtime execution for boarding/payment authorization, no browser validation of parent/student portal rendering, and no runtime proof of cross-school isolation/unauthorized rejection/correct boarding visibility on `404c2ac`. `test:authz`/matrix not re-run on the patch. Isolated Convex environment is unavailable.
 
 **Required to unblock (minimum):** owner approval + (preferred) execute gates 1–3 in an isolated Convex environment with disposable test data and no live M-Pesa initiation, including browser checks and documented evidence; or, if owner explicitly accepts risk, execute the controlled production deployment and post-deployment testing plan above with fresh verified backup, successful health/smoke, disposable-fixture containment/cleanup, and no `/srv/platform` or Freebuff impact — then reissue recommendation based on actual runtime evidence. Rollback to `cf01f1e` is prepared and must remain ready.
+
+## Isolated runtime validation - 13 November 2026
+
+- Tested application commit: 404c2ac
+- Isolated Convex environment: localhost ports 13210/13211
+- Synthetic fixtures; no live M-Pesa credentials or transactions.
+- Targeted tests: 34 PASS, 1 classification mismatch.
+- Mismatch: unauthorized student payment-request access correctly rejected with CONVEX_ERROR; harness expected DENIED.
+- 38-case authorization regression: INCONCLUSIVE due to CLI output parsing.
+- 113-case matrix: NOT RUN.
+- Browser validation: NOT RUN.
+- Isolated environment stopped; temporary test functions removed.
+- Production remains unchanged at cf01f1e.
+- Release decision: controlled deployment requires explicit acceptance of outstanding test risks, verified backup and immediate post-deployment checks.
