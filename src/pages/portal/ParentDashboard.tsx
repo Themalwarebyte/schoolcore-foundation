@@ -10,6 +10,7 @@ import {
   CalendarCheck, Award, Wallet, ClipboardList, ArrowRight, Megaphone, GraduationCap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { BoardingStatusCard } from "./BoardingStatusCard";
 
 export default function ParentDashboard() {
   const childrenData = useQuery(api.portal.parentChildren, {});
@@ -88,6 +89,7 @@ export default function ParentDashboard() {
 
 function ChildOverview({ studentId, childName, className_ }: { studentId: string; childName: string; className_: string | null }) {
   const overview = useQuery(api.portal.parentChildOverview, { studentId: studentId as never });
+  const boarding = useQuery(api.portal.parentChildBoarding, { studentId: studentId as never });
 
   if (overview === undefined) {
     return <div className="h-64 animate-pulse rounded-xl bg-muted" />;
@@ -113,6 +115,8 @@ function ChildOverview({ studentId, childName, className_ }: { studentId: string
           </div>
         </CardContent>
       </Card>
+
+      <BoardingStatusCard boarding={boarding} />
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 gap-3">
