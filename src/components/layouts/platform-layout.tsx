@@ -8,7 +8,7 @@ import {
   DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  LayoutDashboard, School, Users, ScrollText, ChevronLeft, LogOut, Loader2, Globe, UserPlus,
+  LayoutDashboard, School, Users, ScrollText, ChevronLeft, LogOut, Loader2, Globe, UserPlus, Rocket,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuthActions } from "@convex-dev/auth/react";
@@ -17,6 +17,7 @@ const NAV = [
   { to: "/platform", label: "Platform Dashboard", icon: LayoutDashboard, exact: true },
   { to: "/platform/school-requests", label: "School Requests", icon: UserPlus, exact: false },
   { to: "/platform/schools", label: "Schools", icon: School, exact: false },
+  { to: "/platform/launch", label: "Launch Center", icon: Rocket, exact: false },
   { to: "/platform/users", label: "Platform Users", icon: Users, exact: false },
   { to: "/platform/activity", label: "Audit / Activity", icon: ScrollText, exact: false },
 ];
@@ -45,7 +46,7 @@ export function PlatformLayout() {
     .toUpperCase();
 
   return (
-    <div className="flex min-h-screen bg-background">
+    <div className="schoolcore-workspace flex min-h-screen bg-background">
       <aside
         className={cn(
           "fixed inset-y-0 left-0 z-30 flex flex-col border-r bg-sidebar text-sidebar-foreground transition-all duration-200",

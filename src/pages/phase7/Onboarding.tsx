@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
@@ -105,7 +106,7 @@ export default function Onboarding() {
                   <Button size="sm" onClick={() => setUsersOpen(true)}><UserPlus className="size-3.5" /> Invite</Button>
                 )}
                 {!s.done && s.key === "import" && (
-                  <span className="text-xs text-muted-foreground">Use Students → Import (marks this step complete)</span>
+                  <Button asChild size="sm" variant="outline"><Link to="/onboarding/workbook">Import workbook</Link></Button>
                 )}
                 {!s.done && s.key === "activate" && (
                   <Button size="sm" disabled={!allDone} onClick={() => setActivateOpen(true)}>Activate</Button>
