@@ -130,7 +130,7 @@ export function PortalLayout({ variant }: { variant: "parent" | "student" }) {
 
   return (
     <ChildContext.Provider value={{ children: portalChildren, active: activeChild }}>
-      <div className="min-h-screen bg-muted/40">
+      <div className="schoolcore-workspace min-h-screen bg-muted/40">
         {/* Top bar */}
         <header className="sticky top-0 z-30 border-b bg-background/95 backdrop-blur">
           <div className="mx-auto flex h-14 max-w-3xl items-center gap-3 px-4">

@@ -64,6 +64,7 @@ import type * as phase7_inviteCore from "../phase7/inviteCore.js";
 import type * as phase7_inviteTokens from "../phase7/inviteTokens.js";
 import type * as phase7_meals from "../phase7/meals.js";
 import type * as phase7_onboarding from "../phase7/onboarding.js";
+import type * as phase7_schoolWorkbook from "../phase7/schoolWorkbook.js";
 import type * as phase7_promotions from "../phase7/promotions.js";
 import type * as phase7_registration from "../phase7/registration.js";
 import type * as platform from "../platform.js";
@@ -148,6 +149,7 @@ declare const fullApi: ApiFromModules<{
   "phase7/inviteTokens": typeof phase7_inviteTokens;
   "phase7/meals": typeof phase7_meals;
   "phase7/onboarding": typeof phase7_onboarding;
+  "phase7/schoolWorkbook": typeof phase7_schoolWorkbook;
   "phase7/promotions": typeof phase7_promotions;
   "phase7/registration": typeof phase7_registration;
   platform: typeof platform;

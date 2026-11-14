@@ -86,6 +86,7 @@ const NAV: NavGroup[] = [
       { to: "/finance/invoices", label: "Invoices", icon: FileSpreadsheet, permission: "billing.view" },
       { to: "/finance/payments", label: "Payments & Receipts", icon: Receipt, permission: "receipts.view" },
       { to: "/finance/accounts", label: "Student Accounts", icon: PieChart, permission: "billing.view" },
+      { to: "/finance/opening-balances", label: "Opening Balance Review", icon: ClipboardCheck, permission: "finance.view" },
       { to: "/finance/discounts", label: "Discounts & Scholarships", icon: HandCoins, permission: "billing.view" },
       { to: "/finance/expenses", label: "Expenses", icon: ClipboardList, permission: "finance.view" },
       { to: "/finance/reports", label: "Financial Reports", icon: TrendingUp, permission: "financial_reports.view" },
@@ -101,6 +102,7 @@ const NAV: NavGroup[] = [
       { to: "/finance/bank-imports", label: "Bank Imports", icon: FileSpreadsheet, permission: "bank_imports.view" },
       { to: "/meals", label: "Meals", icon: UtensilsCrossed, permission: "meals.view" },
       { to: "/onboarding", label: "School Setup", icon: ListChecks, permission: "onboarding.view" },
+      { to: "/onboarding/workbook", label: "Excel Workbook Import", icon: FileSpreadsheet, permission: "data.import" },
       { to: "/access", label: "Access Management", icon: ShieldCheck, permission: "users.view" },
     ],
   },
@@ -245,7 +247,7 @@ export function SchoolLayout() {
     .toUpperCase();
 
   return (
-    <div className="flex min-h-screen bg-background">
+    <div className="schoolcore-workspace flex min-h-screen bg-background">
       <aside
         className={cn(
           "fixed inset-y-0 left-0 z-30 hidden flex-col border-r bg-sidebar text-sidebar-foreground transition-all duration-200 lg:flex",

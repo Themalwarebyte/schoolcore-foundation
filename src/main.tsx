@@ -93,6 +93,9 @@ const BankImports = lazy(() => import("./pages/phase7/BankImports.tsx"));
 const Meals = lazy(() => import("./pages/phase7/Meals.tsx"));
 const AccessManagement = lazy(() => import("./pages/phase7/AccessManagement.tsx"));
 const PlatformSchoolRequests = lazy(() => import("./pages/platform/SchoolRequests.tsx"));
+const PlatformLaunchCenter = lazy(() => import("./pages/platform/LaunchCenter.tsx"));
+const SchoolWorkbookImport = lazy(() => import("./pages/phase7/SchoolWorkbookImport.tsx"));
+const OpeningBalanceReview = lazy(() => import("./pages/finance/OpeningBalanceReview.tsx"));
 const Activation = lazy(() => import("./pages/phase7/Activation.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
@@ -274,6 +277,8 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="/medical" element={<Medical />} />
                 {/* Phase 7: onboarding, admissions & commercial readiness */}
                 <Route path="/onboarding" element={<Onboarding />} />
+                <Route path="/onboarding/workbook" element={<SchoolWorkbookImport />} />
+                <Route path="/finance/opening-balances" element={<OpeningBalanceReview />} />
                 <Route path="/admissions" element={<Admissions />} />
                 <Route path="/promotions" element={<Promotions />} />
                 <Route path="/finance/voteheads" element={<Voteheads />} />
@@ -334,6 +339,7 @@ createRoot(document.getElementById("root")!).render(
               >
                 <Route path="/platform" element={<PlatformDashboard />} />
                 <Route path="/platform/schools" element={<PlatformSchools />} />
+                <Route path="/platform/launch" element={<PlatformLaunchCenter />} />
                 <Route path="/platform/users" element={<PlatformUsers />} />
                 <Route path="/platform/activity" element={<PlatformActivity />} />
                 <Route path="/platform/school-requests" element={<PlatformSchoolRequests />} />

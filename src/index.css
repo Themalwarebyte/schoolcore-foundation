@@ -134,3 +134,39 @@
     @apply rounded-xl border bg-card shadow-sm;
   }
 }
+
+
+/* SchoolCore interface refinement: premium internal workspace in navy, warm
+   sand and teal. Scoped to authenticated layouts, not public registration. */
+.schoolcore-workspace {
+  background-image:
+    radial-gradient(circle at 100% 1%, rgba(35, 118, 127, .08), transparent 36rem),
+    radial-gradient(circle at 0% 97%, rgba(193, 146, 66, .06), transparent 34rem);
+  background-attachment: fixed;
+}
+.schoolcore-workspace .page-shell > .card-soft,
+.schoolcore-workspace .card-soft {
+  border-color: color-mix(in oklab, var(--border) 77%, #b59b6e 23%);
+  box-shadow: 0 6px 24px rgba(23, 40, 53, .045);
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+.schoolcore-workspace a:focus-visible,
+.schoolcore-workspace button:focus-visible,
+.schoolcore-landing a:focus-visible,
+.schoolcore-landing button:focus-visible {
+  outline: 3px solid #d4a653;
+  outline-offset: 3px;
+}
+.schoolcore-workspace .card-soft:hover {
+  border-color: color-mix(in oklab, var(--border) 47%, #b69b6a 53%);
+  box-shadow: 0 10px 28px rgba(21, 45, 58, .085);
+}
+.schoolcore-landing { font-family: "Aptos", "Inter", "Segoe UI", system-ui, sans-serif; }
+.schoolcore-landing h1, .schoolcore-landing h2, .schoolcore-landing h3 { text-wrap: balance; }
+.schoolcore-landing .landing-register .card-soft { border: 0; box-shadow: none; }
+.schoolcore-landing .landing-register input { background: #f7f7f5; border-color: #e7e2d8; color: #18222c; }
+.schoolcore-landing .landing-register button[type="submit"] { background: #b38943; color: #0b0b0a; }
+.schoolcore-landing .landing-register button[type="submit"]:hover { background: #dfbd7d; }
+@media (prefers-reduced-motion: reduce) {
+  .schoolcore-workspace *, .schoolcore-landing * { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+}
